@@ -77,6 +77,7 @@ export interface AuthViewer {
   isAuthenticated: boolean;
   isDemo: boolean;
   redditConnected: boolean;
+  redditConnectionMode: "none" | "live" | "sample";
 }
 
 export interface RecommendationsMapResponse {

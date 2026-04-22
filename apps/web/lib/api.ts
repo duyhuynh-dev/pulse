@@ -97,3 +97,9 @@ export function startRedditConnection() {
     method: "POST"
   });
 }
+
+export function startMockRedditConnection() {
+  return request<{ ok: true }>("/v1/reddit/mock-connect", {
+    method: "POST"
+  });
+}

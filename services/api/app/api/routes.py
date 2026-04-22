@@ -26,6 +26,7 @@ from app.services.auth import (
 from app.services.profile import list_interests, update_interests
 from app.services.recommendations import get_archive, get_map_recommendations
 from app.services.reddit_oauth import build_reddit_authorize_url
+from app.services.seed import bootstrap_user_with_mock_reddit
 
 router = APIRouter(prefix="/v1")
 
@@ -55,18 +56,26 @@ async def auth_me(
     session: AsyncSession = Depends(get_db),
     identity=Depends(current_identity),
 ) -> AuthViewerResponse:
-    reddit_connection = await session.scalar(
+    live_connection = await session.scalar(
         select(OAuthConnection).where(
             OAuthConnection.user_id == identity.user.id,
             OAuthConnection.provider == "reddit",
         )
     )
+    sample_connection = await session.scalar(
+        select(OAuthConnection).where(
+            OAuthConnection.user_id == identity.user.id,
+            OAuthConnection.provider == "reddit_mock",
+        )
+    )
+    connection_mode = "live" if live_connection else "sample" if sample_connection else "none"
     return AuthViewerResponse(
         email=identity.user.email,
         displayName=identity.user.display_name,
         isAuthenticated=identity.is_authenticated,
         isDemo=identity.is_demo,
-        redditConnected=reddit_connection is not None,
+        redditConnected=connection_mode != "none",
+        redditConnectionMode=connection_mode,
     )
 
 
@@ -160,6 +169,15 @@ async def reddit_connect_callback(
     connection.scope_csv = token_payload.get("scope")
     await session.commit()
     return RedirectResponse(f"{settings.web_app_url}/?reddit=connected", status_code=status.HTTP_302_FOUND)
+
+
+@router.post("/reddit/mock-connect", response_model=OkResponse)
+async def reddit_mock_connect(
+    session: AsyncSession = Depends(get_db),
+    identity=Depends(authenticated_identity),
+) -> OkResponse:
+    await bootstrap_user_with_mock_reddit(session, identity.user, create_connection=True)
+    return OkResponse()
 
 
 @router.get("/profile/interests", response_model=InterestListResponse)

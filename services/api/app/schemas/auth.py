@@ -7,8 +7,8 @@ class AuthViewerResponse(BaseModel):
     isAuthenticated: bool
     isDemo: bool
     redditConnected: bool
+    redditConnectionMode: str = "none"
 
 
 class RedditConnectStartResponse(BaseModel):
     authorizeUrl: str
-
