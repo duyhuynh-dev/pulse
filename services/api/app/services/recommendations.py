@@ -10,6 +10,7 @@ from app.models.recommendation import DigestDelivery, FeedbackEvent, Recommendat
 from app.models.user import User, UserAnchorLocation, UserConstraint
 from app.schemas.recommendations import (
     ArchiveResponse,
+    ArchiveSnapshot,
     MapVenuePin,
     RecommendationsMapResponse,
     RecommendationReason,
@@ -504,6 +505,30 @@ def _secondary_events_payload(entries: list[dict]) -> list[dict]:
     return payload
 
 
+def _archive_kind(provider: str | None) -> str:
+    if not provider:
+        return "live"
+    if "scheduled" in provider:
+        return "scheduled"
+    if "preview" in provider:
+        return "preview"
+    return "snapshot"
+
+
+def _archive_title(kind: str) -> str:
+    if kind == "scheduled":
+        return "Weekly digest"
+    if kind == "preview":
+        return "Preview send"
+    if kind == "snapshot":
+        return "Saved snapshot"
+    return "Current shortlist"
+
+
+def _deletable_run_ids(run_ids: list[str], protected_run_ids: set[str]) -> list[str]:
+    return [run_id for run_id in run_ids if run_id not in protected_run_ids]
+
+
 def _run_is_stale(run: RecommendationRun) -> bool:
     return datetime.now(tz=UTC) - _timestamp_utc(run.created_at) >= RECOMMENDATION_MAX_AGE
 
@@ -530,9 +555,22 @@ async def _replace_user_runs(session: AsyncSession, user_id: str) -> None:
     if not run_ids:
         return
 
-    await session.execute(delete(VenueRecommendation).where(VenueRecommendation.run_id.in_(run_ids)))
-    await session.execute(delete(DigestDelivery).where(DigestDelivery.recommendation_run_id.in_(run_ids)))
-    await session.execute(delete(RecommendationRun).where(RecommendationRun.id.in_(run_ids)))
+    protected_run_ids = set(
+        (
+            await session.scalars(
+                select(DigestDelivery.recommendation_run_id).where(
+                    DigestDelivery.recommendation_run_id.in_(run_ids)
+                )
+            )
+        ).all()
+    )
+    deletable_run_ids = _deletable_run_ids(run_ids, protected_run_ids)
+    if not deletable_run_ids:
+        return
+
+    await session.execute(delete(VenueRecommendation).where(VenueRecommendation.run_id.in_(deletable_run_ids)))
+    await session.execute(delete(DigestDelivery).where(DigestDelivery.recommendation_run_id.in_(deletable_run_ids)))
+    await session.execute(delete(RecommendationRun).where(RecommendationRun.id.in_(deletable_run_ids)))
     await session.flush()
 
 
@@ -667,17 +705,10 @@ def _empty_response() -> RecommendationsMapResponse:
     )
 
 
-async def get_map_recommendations(
+async def _cards_for_run(
     session: AsyncSession,
-    user: User,
-) -> RecommendationsMapResponse:
-    run = await refresh_recommendations_for_user(session, user)
-    if run is None:
-        return _empty_response()
-
-    anchor = await _user_anchor(session, user.id)
-    constraints = await _user_constraints(session, user.id)
-
+    run: RecommendationRun,
+) -> tuple[list[MapVenuePin], list[VenueRecommendationCard], dict[str, VenueRecommendationCard]]:
     recommendation_rows = (
         await session.scalars(
             select(VenueRecommendation)
@@ -686,9 +717,10 @@ async def get_map_recommendations(
         )
     ).all()
     if not recommendation_rows:
-        return _empty_response()
+        return [], [], {}
 
     pins: list[MapVenuePin] = []
+    items: list[VenueRecommendationCard] = []
     cards: dict[str, VenueRecommendationCard] = {}
 
     for index, recommendation in enumerate(recommendation_rows):
@@ -709,7 +741,7 @@ async def get_map_recommendations(
             for item in recommendation.reasons_json
         ]
 
-        cards[venue.id] = VenueRecommendationCard(
+        card = VenueRecommendationCard(
             venueId=venue.id,
             venueName=venue.name,
             neighborhood=venue.neighborhood or "NYC",
@@ -724,6 +756,8 @@ async def get_map_recommendations(
             reasons=reasons,
             secondaryEvents=recommendation.secondary_events_json or [],
         )
+        items.append(card)
+        cards[venue.id] = card
         pins.append(
             MapVenuePin(
                 venueId=venue.id,
@@ -734,6 +768,23 @@ async def get_map_recommendations(
                 selected=index == 0,
             )
         )
+
+    return pins, items, cards
+
+
+async def get_map_recommendations(
+    session: AsyncSession,
+    user: User,
+) -> RecommendationsMapResponse:
+    run = await refresh_recommendations_for_user(session, user)
+    if run is None:
+        return _empty_response()
+
+    anchor = await _user_anchor(session, user.id)
+    constraints = await _user_constraints(session, user.id)
+    pins, items, cards = await _cards_for_run(session, run)
+    if not items:
+        return _empty_response()
 
     return RecommendationsMapResponse(
         viewport=run.viewport_json,
@@ -753,9 +804,54 @@ async def get_map_recommendations(
 
 
 async def get_archive(session: AsyncSession, user: User) -> ArchiveResponse:
-    map_response = await get_map_recommendations(session, user)
-    items = sorted(map_response.cards.values(), key=lambda item: item.score, reverse=True)
-    return ArchiveResponse(items=items)
+    latest_run = await refresh_recommendations_for_user(session, user)
+    if latest_run is None:
+        return ArchiveResponse(items=[], history=[])
+
+    _, items, _ = await _cards_for_run(session, latest_run)
+
+    delivery_rows = (
+        await session.scalars(
+            select(DigestDelivery)
+            .where(
+                DigestDelivery.user_id == user.id,
+                DigestDelivery.status == "sent",
+            )
+            .order_by(desc(DigestDelivery.created_at))
+        )
+    ).all()
+
+    snapshots: list[ArchiveSnapshot] = []
+    seen_run_ids: set[str] = set()
+
+    for delivery in delivery_rows:
+        if delivery.recommendation_run_id == latest_run.id:
+            continue
+        if delivery.recommendation_run_id in seen_run_ids:
+            continue
+
+        run = await session.get(RecommendationRun, delivery.recommendation_run_id)
+        if run is None:
+            continue
+
+        _, historical_items, _ = await _cards_for_run(session, run)
+        if not historical_items:
+            continue
+
+        kind = _archive_kind(delivery.provider)
+        snapshots.append(
+            ArchiveSnapshot(
+                runId=run.id,
+                kind=kind,
+                title=_archive_title(kind),
+                generatedAt=run.created_at.isoformat(),
+                deliveredAt=delivery.created_at.isoformat(),
+                items=historical_items,
+            )
+        )
+        seen_run_ids.add(run.id)
+
+    return ArchiveResponse(items=items, history=snapshots)
 
 
 def _price_label(min_price: float | None, max_price: float | None) -> str:

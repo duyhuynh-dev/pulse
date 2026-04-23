@@ -88,8 +88,18 @@ export interface RecommendationsMapResponse {
   userConstraint: UserConstraint;
 }
 
+export interface ArchiveSnapshot {
+  runId: string;
+  kind: "live" | "preview" | "scheduled" | "snapshot";
+  title: string;
+  generatedAt: string;
+  deliveredAt?: string | null;
+  items: VenueRecommendationCard[];
+}
+
 export interface ArchiveResponse {
   items: VenueRecommendationCard[];
+  history: ArchiveSnapshot[];
 }
 
 export interface LocationAnchorPayload {

@@ -58,8 +58,18 @@ class RecommendationsMapResponse(BaseModel):
     userConstraint: dict
 
 
+class ArchiveSnapshot(BaseModel):
+    runId: str
+    kind: str
+    title: str
+    generatedAt: str
+    deliveredAt: str | None = None
+    items: list[VenueRecommendationCard] = Field(default_factory=list)
+
+
 class ArchiveResponse(BaseModel):
     items: list[VenueRecommendationCard]
+    history: list[ArchiveSnapshot] = Field(default_factory=list)
 
 
 class FeedbackReason(BaseModel):
@@ -70,4 +80,3 @@ class FeedbackReason(BaseModel):
 class FeedbackPayload(BaseModel):
     action: str
     reasons: list[FeedbackReason] = Field(default_factory=list)
-

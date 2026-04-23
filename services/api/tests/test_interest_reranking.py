@@ -3,7 +3,10 @@ from app.models.profile import UserInterestProfile
 from app.models.events import Venue
 from app.services.recommendations import (
     FeedbackSignals,
+    _archive_kind,
+    _archive_title,
     _candidate_score,
+    _deletable_run_ids,
     _derive_topic_keys,
     _feedback_adjustment,
     _score_band,
@@ -160,3 +163,19 @@ def test_feedback_adjustment_penalizes_dismissed_patterns() -> None:
     assert adjustment < 0
     assert feedback_reason is not None
     assert feedback_reason["title"] == "Dismiss pattern"
+
+
+def test_deletable_run_ids_preserve_digest_backed_history() -> None:
+    run_ids = ["run-live", "run-preview", "run-scheduled"]
+    protected_run_ids = {"run-preview", "run-scheduled"}
+
+    assert _deletable_run_ids(run_ids, protected_run_ids) == ["run-live"]
+
+
+def test_archive_kind_and_title_match_delivery_provider() -> None:
+    assert _archive_kind(None) == "live"
+    assert _archive_title("live") == "Current shortlist"
+    assert _archive_kind("resend-preview") == "preview"
+    assert _archive_title("preview") == "Preview send"
+    assert _archive_kind("resend-scheduled") == "scheduled"
+    assert _archive_title("scheduled") == "Weekly digest"
