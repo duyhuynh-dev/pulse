@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import httpx
 
 from app.connectors.curated_venues import CuratedVenueConnector
@@ -13,6 +14,7 @@ DEFAULT_SUPPLY_QUERIES = [
     RetrievalQuery(query="gallery installation nyc", source="curated_venues", category="culture"),
     RetrievalQuery(query="indie songwriter brooklyn", source="curated_venues", category="live music"),
 ]
+SUPPLY_LOOKAHEAD = timedelta(days=90)
 
 
 def build_daily_supply_queries() -> list[RetrievalQuery]:
@@ -34,6 +36,8 @@ async def collect_supply_candidates() -> list[CandidateEvent]:
             continue
 
         for candidate in await connector.search(query):
+            if not _candidate_is_usable(candidate):
+                continue
             fingerprint = _dedupe_fingerprint(candidate)
             if candidate.source_event_key in seen_keys or fingerprint in seen_fingerprints:
                 continue
@@ -45,10 +49,34 @@ async def collect_supply_candidates() -> list[CandidateEvent]:
 
 
 def _dedupe_fingerprint(candidate: CandidateEvent) -> str:
-    normalized_title = " ".join(candidate.title.lower().split())
-    normalized_venue = " ".join(candidate.venue_name.lower().split())
+    normalized_title = _normalize_fingerprint_text(candidate.title)
+    normalized_venue = _normalize_fingerprint_text(candidate.venue_name)
     starts_on = candidate.starts_at[:10]
     return f"{normalized_venue}|{normalized_title}|{starts_on}"
+
+
+def _normalize_fingerprint_text(value: str) -> str:
+    normalized = "".join(character.lower() if character.isalnum() else " " for character in value)
+    return " ".join(normalized.split())
+
+
+def _candidate_is_usable(candidate: CandidateEvent) -> bool:
+    try:
+        starts_at = datetime.fromisoformat(candidate.starts_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+
+    if starts_at.tzinfo is None:
+        starts_at = starts_at.replace(tzinfo=UTC)
+
+    now = datetime.now(tz=UTC)
+    if starts_at < now - timedelta(hours=4):
+        return False
+    if starts_at > now + SUPPLY_LOOKAHEAD:
+        return False
+    if candidate.latitude == 0.0 or candidate.longitude == 0.0:
+        return False
+    return bool(candidate.title.strip() and candidate.venue_name.strip())
 
 
 async def sync_supply_to_api(candidates: list[CandidateEvent]) -> dict:

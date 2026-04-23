@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 import httpx
 
 from app.core.config import get_settings
@@ -36,6 +39,15 @@ class TicketmasterConnector:
         for item in payload.get("_embedded", {}).get("events", []):
             venue = item.get("_embedded", {}).get("venues", [{}])[0]
             location = venue.get("location", {})
+            dates = item.get("dates", {}) or {}
+            event_timezone = dates.get("timezone")
+            starts_at = _normalize_ticketmaster_datetime(dates.get("start", {}), event_timezone)
+            if starts_at is None:
+                continue
+            latitude = _coerce_coordinate(location.get("latitude"))
+            longitude = _coerce_coordinate(location.get("longitude"))
+            if latitude is None or longitude is None:
+                continue
             address = venue.get("address", {}).get("line1") or venue.get("name", "Unknown venue")
             city = venue.get("city", {}).get("name") or "New York City"
             state = venue.get("state", {}).get("stateCode") or "NY"
@@ -61,10 +73,10 @@ class TicketmasterConnector:
                     title=item.get("name", "Untitled event"),
                     summary=item.get("info") or item.get("pleaseNote"),
                     category=segment or query.category,
-                    starts_at=item.get("dates", {}).get("start", {}).get("dateTime", ""),
-                    ends_at=item.get("dates", {}).get("end", {}).get("dateTime"),
-                    latitude=float(location.get("latitude", 0.0)),
-                    longitude=float(location.get("longitude", 0.0)),
+                    starts_at=starts_at,
+                    ends_at=_normalize_ticketmaster_datetime(dates.get("end", {}), event_timezone),
+                    latitude=latitude,
+                    longitude=longitude,
                     ticket_url=item.get("url"),
                     min_price=(item.get("priceRanges") or [{}])[0].get("min"),
                     max_price=(item.get("priceRanges") or [{}])[0].get("max"),
@@ -74,3 +86,51 @@ class TicketmasterConnector:
                 )
             )
         return events
+
+
+def _coerce_coordinate(value: object) -> float | None:
+    try:
+        coordinate = float(value)
+    except (TypeError, ValueError):
+        return None
+    if coordinate == 0.0:
+        return None
+    return coordinate
+
+
+def _normalize_ticketmaster_datetime(payload: dict | None, fallback_timezone: str | None = None) -> str | None:
+    if not payload:
+        return None
+
+    date_time = payload.get("dateTime")
+    if isinstance(date_time, str) and date_time.strip():
+        try:
+            parsed = datetime.fromisoformat(date_time.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC).isoformat()
+
+    local_date = payload.get("localDate")
+    local_time = payload.get("localTime")
+    if not isinstance(local_date, str) or not local_date.strip():
+        return None
+    if not isinstance(local_time, str) or not local_time.strip():
+        return None
+
+    timezone_name = payload.get("timezone") or fallback_timezone or "America/New_York"
+    try:
+        timezone = ZoneInfo(str(timezone_name))
+    except ZoneInfoNotFoundError:
+        timezone = ZoneInfo("America/New_York")
+
+    for time_format in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            naive = datetime.strptime(f"{local_date} {local_time}", time_format)
+            return naive.replace(tzinfo=timezone).astimezone(UTC).isoformat()
+        except ValueError:
+            continue
+
+    return None

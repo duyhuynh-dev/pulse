@@ -1,4 +1,5 @@
 from app.models.events import CanonicalEvent
+from app.models.events import EventOccurrence
 from app.models.profile import UserInterestProfile
 from app.models.events import Venue
 from app.services.recommendations import (
@@ -9,8 +10,11 @@ from app.services.recommendations import (
     _deletable_run_ids,
     _derive_topic_keys,
     _feedback_adjustment,
+    _occurrence_is_rankable,
+    _parse_occurrence_start,
     _score_band,
 )
+from datetime import UTC, datetime, timedelta
 
 
 def test_muted_topic_scores_lower_than_matching_active_topic() -> None:
@@ -179,3 +183,33 @@ def test_archive_kind_and_title_match_delivery_provider() -> None:
     assert _archive_title("preview") == "Preview send"
     assert _archive_kind("resend-scheduled") == "scheduled"
     assert _archive_title("scheduled") == "Weekly digest"
+
+
+def test_parse_occurrence_start_handles_iso_datetimes() -> None:
+    parsed = _parse_occurrence_start("2026-04-28T00:30:00+00:00")
+
+    assert parsed == datetime(2026, 4, 28, 0, 30, tzinfo=UTC)
+
+
+def test_occurrence_is_rankable_filters_past_and_far_future_events() -> None:
+    now = datetime(2026, 4, 23, 16, 0, tzinfo=UTC)
+
+    current_occurrence = EventOccurrence(
+        event_id="event-1",
+        venue_id="venue-1",
+        starts_at="2026-04-23T20:00:00+00:00",
+    )
+    stale_occurrence = EventOccurrence(
+        event_id="event-2",
+        venue_id="venue-1",
+        starts_at=(now - timedelta(hours=3)).isoformat(),
+    )
+    far_future_occurrence = EventOccurrence(
+        event_id="event-3",
+        venue_id="venue-1",
+        starts_at=(now + timedelta(days=75)).isoformat(),
+    )
+
+    assert _occurrence_is_rankable(current_occurrence, now=now) is True
+    assert _occurrence_is_rankable(stale_occurrence, now=now) is False
+    assert _occurrence_is_rankable(far_future_occurrence, now=now) is False

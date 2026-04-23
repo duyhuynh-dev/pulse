@@ -33,6 +33,8 @@ NYC_SERVICE_AREA = {
 }
 RECOMMENDATION_MAX_AGE = timedelta(minutes=30)
 FEEDBACK_LOOKBACK_WINDOW = timedelta(days=28)
+OCCURRENCE_LOOKBACK_WINDOW = timedelta(hours=2)
+OCCURRENCE_LOOKAHEAD_WINDOW = timedelta(days=60)
 TOPIC_KEYWORD_MAP = {
     "underground_dance": ["techno", "warehouse", "club", "dance", "rave", "dj"],
     "indie_live_music": ["indie", "band", "concert", "live music", "show", "songwriter", "alt-pop"],
@@ -537,6 +539,28 @@ def _run_is_stale(run: RecommendationRun) -> bool:
     return datetime.now(tz=UTC) - _timestamp_utc(run.created_at) >= RECOMMENDATION_MAX_AGE
 
 
+def _parse_occurrence_start(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _occurrence_is_rankable(occurrence: EventOccurrence, *, now: datetime | None = None) -> bool:
+    starts_at = _parse_occurrence_start(occurrence.starts_at)
+    if starts_at is None:
+        return False
+    current_time = now or datetime.now(tz=UTC)
+    if starts_at < current_time - OCCURRENCE_LOOKBACK_WINDOW:
+        return False
+    if starts_at > current_time + OCCURRENCE_LOOKAHEAD_WINDOW:
+        return False
+    return True
+
+
 def _run_context_changed(
     run: RecommendationRun,
     anchor: UserAnchorLocation | None,
@@ -631,6 +655,8 @@ async def refresh_recommendations_for_user(
 
     venue_entries: dict[str, list[dict]] = {}
     for occurrence in occurrence_rows:
+        if not _occurrence_is_rankable(occurrence):
+            continue
         venue = await session.get(Venue, occurrence.venue_id)
         event = await session.get(CanonicalEvent, occurrence.event_id)
         if not venue or not event:

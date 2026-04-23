@@ -1,7 +1,7 @@
 import pytest
 
 from app.models.contracts import CandidateEvent, RetrievalQuery
-from app.services.supply_sync import build_daily_supply_queries, collect_supply_candidates
+from app.services.supply_sync import _candidate_is_usable, build_daily_supply_queries, collect_supply_candidates
 
 
 def test_daily_supply_queries_cover_api_and_curated_sources() -> None:
@@ -83,3 +83,25 @@ async def test_collect_supply_candidates_dedupes_by_normalized_event_fingerprint
     candidates = await collect_supply_candidates()
     assert len(candidates) == 1
     assert candidates[0].source_event_key in {"ticketmaster-1", "curated-1"}
+
+
+def test_candidate_is_usable_rejects_stale_or_invalid_coordinates() -> None:
+    usable = CandidateEvent(
+        source="ticketmaster",
+        source_event_key="usable",
+        venue_name="Elsewhere",
+        neighborhood="Bushwick",
+        address="599 Johnson Ave, Brooklyn, NY",
+        title="Warehouse textures",
+        starts_at="2026-05-25T23:30:00+00:00",
+        latitude=40.7063,
+        longitude=-73.9232,
+    )
+    stale = usable.model_copy(update={"source_event_key": "stale", "starts_at": "2020-04-25T23:30:00+00:00"})
+    too_far_future = usable.model_copy(update={"source_event_key": "too-far", "starts_at": "2099-04-25T23:30:00+00:00"})
+    invalid_coordinates = usable.model_copy(update={"source_event_key": "bad-coords", "latitude": 0.0})
+
+    assert _candidate_is_usable(usable) is True
+    assert _candidate_is_usable(stale) is False
+    assert _candidate_is_usable(too_far_future) is False
+    assert _candidate_is_usable(invalid_coordinates) is False

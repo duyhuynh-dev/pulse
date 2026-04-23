@@ -108,6 +108,7 @@ async def _upsert_occurrence(
     event_id: str,
     venue_id: str,
 ) -> tuple[EventOccurrence, bool]:
+    await _retire_competing_occurrences(session, event_id, venue_id, keep_starts_at=item.starts_at)
     occurrence = await session.scalar(
         select(EventOccurrence).where(
             EventOccurrence.event_id == event_id,
@@ -144,6 +145,29 @@ async def _upsert_occurrence(
         occurrence.is_active = True
 
     return occurrence, created
+
+
+async def _retire_competing_occurrences(
+    session: AsyncSession,
+    event_id: str,
+    venue_id: str,
+    *,
+    keep_starts_at: str,
+) -> None:
+    competing_occurrences = list(
+        (
+            await session.scalars(
+                select(EventOccurrence).where(
+                    EventOccurrence.event_id == event_id,
+                    EventOccurrence.venue_id == venue_id,
+                    EventOccurrence.starts_at != keep_starts_at,
+                    EventOccurrence.is_active.is_(True),
+                )
+            )
+        ).all()
+    )
+    for occurrence in competing_occurrences:
+        occurrence.is_active = False
 
 
 async def _upsert_geocode(session: AsyncSession, venue_id: str, provider_place_id: str) -> None:
