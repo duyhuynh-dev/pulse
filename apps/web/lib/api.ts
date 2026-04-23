@@ -35,7 +35,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed for ${path} with status ${response.status}`);
+    let detail = `Request failed for ${path} with status ${response.status}`;
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (contentType.includes("application/json")) {
+      const payload = await response.json().catch(() => null);
+      if (payload && typeof payload === "object" && "detail" in payload && typeof payload.detail === "string") {
+        detail = payload.detail;
+      }
+    } else {
+      const text = await response.text().catch(() => "");
+      if (text) {
+        detail = text;
+      }
+    }
+
+    throw new Error(detail);
   }
 
   return response.json() as Promise<T>;

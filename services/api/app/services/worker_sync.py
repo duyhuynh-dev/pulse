@@ -20,7 +20,7 @@ async def trigger_worker_supply_sync() -> SupplySyncResponse:
             response.raise_for_status()
             payload = response.json()
     except httpx.HTTPError as error:
-        raise RuntimeError("Pulse worker is unavailable for supply sync.") from error
+        raise RuntimeError("Pulse worker is unavailable for supply sync. Start the worker on port 8001 and try again.") from error
 
     return SupplySyncResponse(
         candidateCount=payload.get("candidate_count", 0),
