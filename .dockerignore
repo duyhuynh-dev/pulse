@@ -1,0 +1,15 @@
+.git
+.github
+.turbo
+.next
+node_modules
+apps/web/.next
+apps/web/node_modules
+services/api/.venv
+services/worker/.venv
+services/**/__pycache__
+services/**/*.pyc
+*.db
+.env
+.env.local
+deploy/ec2/.env.ec2

@@ -86,6 +86,12 @@ What to expect:
 - removing `dry_run=true` sends the real scheduled digest, assuming `RESEND_API_KEY` is configured
 - the worker endpoint requires the same `INTERNAL_INGEST_SECRET` used for supply sync
 
+## EC2 deployment
+
+- A full single-instance `EC2 + Docker Compose + Caddy` deployment scaffold now lives under [deploy/ec2/README.md](/Users/duyhuynh/Desktop/project/ig-location-suggestion-app/deploy/ec2/README.md).
+- That stack runs `web`, `api`, and `worker` together on one box while keeping `Supabase`, `Resend`, and `Inngest Cloud` as managed services.
+- The production compose file is at [deploy/ec2/docker-compose.yml](/Users/duyhuynh/Desktop/project/ig-location-suggestion-app/deploy/ec2/docker-compose.yml).
+
 ## Notes
 
 - The implementation uses coarse user anchors by default. Exact browser location is session-only.

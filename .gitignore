@@ -1,5 +1,6 @@
 .DS_Store
 .env
+deploy/ec2/.env.ec2
 .env.local
 .env.*.local
 .venv

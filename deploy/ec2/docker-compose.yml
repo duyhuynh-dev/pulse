@@ -1,0 +1,80 @@
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      WORKER_DOMAIN: ${WORKER_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+      - worker
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+
+  api:
+    build:
+      context: ../..
+      dockerfile: services/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      DEFAULT_USER_EMAIL: ${DEFAULT_USER_EMAIL}
+      API_BASE_URL: https://${API_DOMAIN}
+      WORKER_BASE_URL: http://worker:8001
+      WEB_APP_URL: https://${APP_DOMAIN}
+      WEB_ALLOWED_ORIGINS: https://${APP_DOMAIN}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      OAUTH_STATE_SECRET: ${OAUTH_STATE_SECRET}
+      INTERNAL_INGEST_SECRET: ${INTERNAL_INGEST_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      DIGEST_FROM_EMAIL: ${DIGEST_FROM_EMAIL}
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET}
+      REDDIT_REDIRECT_URI: https://${API_DOMAIN}/v1/reddit/connect/callback
+      APPLE_MAPS_TEAM_ID: ${APPLE_MAPS_TEAM_ID}
+      APPLE_MAPS_KEY_ID: ${APPLE_MAPS_KEY_ID}
+      APPLE_MAPS_PRIVATE_KEY: ${APPLE_MAPS_PRIVATE_KEY}
+      APPLE_MAPS_MAPS_ID: ${APPLE_MAPS_MAPS_ID}
+      APPLE_MAPS_ORIGIN: https://${APP_DOMAIN}
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: services/worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      ENV: production
+      API_BASE_URL: http://api:8000
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL}
+      INNGEST_APP_ID: ${INNGEST_APP_ID}
+      INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
+      TICKETMASTER_API_KEY: ${TICKETMASTER_API_KEY}
+      INTERNAL_INGEST_SECRET: ${INTERNAL_INGEST_SECRET}
+
+volumes:
+  caddy_data:
+  caddy_config:
