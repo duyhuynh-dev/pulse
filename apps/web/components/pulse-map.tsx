@@ -227,6 +227,25 @@ export function PulseMap({
 
   useEffect(() => {
     const map = mapInstanceRef.current;
+    if (!map || !selectedVenueId) {
+      return;
+    }
+
+    const selectedPin = pins.find((pin) => pin.venueId === selectedVenueId);
+    if (!selectedPin) {
+      return;
+    }
+
+    programmaticCameraRef.current = true;
+    map.easeTo({
+      center: [selectedPin.longitude, selectedPin.latitude],
+      duration: 700,
+      offset: [0, -28],
+    });
+  }, [pins, selectedVenueId]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
     const maplibregl = maplibreRef.current;
     if (!map || !maplibregl) {
       return;
@@ -261,18 +280,7 @@ export function PulseMap({
   }
 
   return (
-    <div className="relative h-[62vh] min-h-[420px] w-full overflow-hidden bg-[radial-gradient(circle_at_top,#f7efe0,transparent_35%),linear-gradient(135deg,#f4ede2,#e8f4f1)]">
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-4 border-b border-stroke/70 bg-white/78 px-5 py-4 backdrop-blur">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Interactive Map</p>
-          <p className="mt-1 text-sm text-slate-600">
-            Live venue pins powered by MapLibre and OpenStreetMap, centered around your current shortlist.
-          </p>
-        </div>
-        <span className="hidden rounded-full bg-white/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-accent md:inline-flex">
-          MapLibre + OSM
-        </span>
-      </div>
+    <div className="relative h-full min-h-[520px] w-full overflow-hidden bg-[radial-gradient(circle_at_top,#f7efe0,transparent_35%),linear-gradient(135deg,#f4ede2,#e8f4f1)]">
       {mode === "loading" ? (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 text-sm text-slate-500">
           Loading live map...

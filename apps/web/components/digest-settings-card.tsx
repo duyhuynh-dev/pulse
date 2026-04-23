@@ -134,7 +134,7 @@ export function DigestSettingsCard({ compact = false }: { compact?: boolean }) {
             <select
               {...form.register("digestDay")}
               disabled={!values.weeklyDigestEnabled}
-              className="rounded-2xl border border-stroke bg-white px-3 py-2 text-sm disabled:bg-canvas/70 disabled:text-slate-400"
+              className="rounded-[1.1rem] border border-stroke bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-accent/35 focus:ring-2 focus:ring-accent/15 disabled:bg-canvas/70 disabled:text-slate-400"
             >
               {digestDays.map((day) => (
                 <option key={day} value={day}>
@@ -150,7 +150,7 @@ export function DigestSettingsCard({ compact = false }: { compact?: boolean }) {
               type="time"
               {...form.register("digestTimeLocal")}
               disabled={!values.weeklyDigestEnabled}
-              className="rounded-2xl border border-stroke bg-white px-3 py-2 text-sm disabled:bg-canvas/70 disabled:text-slate-400"
+              className="rounded-[1.1rem] border border-stroke bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-accent/35 focus:ring-2 focus:ring-accent/15 disabled:bg-canvas/70 disabled:text-slate-400"
             />
           </label>
         </div>
@@ -164,7 +164,7 @@ export function DigestSettingsCard({ compact = false }: { compact?: boolean }) {
             disabled={saveMutation.isPending || preferencesQuery.isLoading}
             className="rounded-full border border-stroke bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-canvas disabled:opacity-60"
           >
-            {saveMutation.isPending ? "Saving..." : "Save digest timing"}
+            {saveMutation.isPending ? "Saving..." : "Save"}
           </button>
         </div>
       </form>

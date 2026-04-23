@@ -112,7 +112,7 @@ export function LocationOnboardingCard({ compact = false }: { compact?: boolean 
           <span className={compact ? "text-xs font-semibold uppercase tracking-[0.18em] text-slate-500" : "text-sm font-medium text-slate-700"}>ZIP code</span>
           <input
             {...form.register("zipCode")}
-            className="rounded-2xl border border-stroke bg-white px-3 py-2 text-sm"
+            className="rounded-[1.1rem] border border-stroke bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-accent/35 focus:ring-2 focus:ring-accent/15"
           />
         </label>
         <label className={compact ? "grid gap-1 sm:col-span-1" : "grid gap-1"}>
@@ -120,19 +120,19 @@ export function LocationOnboardingCard({ compact = false }: { compact?: boolean 
           <input
             type="number"
             {...form.register("radiusMiles")}
-            className="rounded-2xl border border-stroke bg-white px-3 py-2 text-sm"
+            className="rounded-[1.1rem] border border-stroke bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-accent/35 focus:ring-2 focus:ring-accent/15"
           />
         </label>
         <label className={compact ? "grid gap-1 sm:col-span-2" : "grid gap-1"}>
           <span className={compact ? "text-xs font-semibold uppercase tracking-[0.18em] text-slate-500" : "text-sm font-medium text-slate-700"}>Neighborhood</span>
           <input
             {...form.register("neighborhood")}
-            className="rounded-2xl border border-stroke bg-white px-3 py-2 text-sm"
+            className="rounded-[1.1rem] border border-stroke bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-accent/35 focus:ring-2 focus:ring-accent/15"
           />
         </label>
 
-        <button type="submit" className={compact ? "rounded-full border border-stroke bg-white px-4 py-2 text-sm font-medium shadow-sm sm:col-span-2" : "rounded-full border border-stroke bg-white px-4 py-2 text-sm font-medium"}>
-          Save planning anchor
+        <button type="submit" className={compact ? "rounded-full border border-stroke bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:bg-canvas sm:col-span-2" : "rounded-full border border-stroke bg-white px-4 py-2 text-sm font-medium transition hover:bg-canvas"}>
+          Save anchor
         </button>
       </form>
     </div>

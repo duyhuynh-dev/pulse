@@ -19,16 +19,21 @@ export function InterestProfilePanel({
   onAction
 }: InterestProfilePanelProps) {
   return (
-    <div className="rounded-[2rem] border border-stroke/80 bg-card/70 p-6 shadow-float backdrop-blur">
+    <div className="rounded-[2rem] border border-stroke/80 bg-card/70 p-5 shadow-float backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium uppercase tracking-[0.22em] text-accent">Interest profile</p>
-          <h2 className="mt-2 text-2xl font-semibold">Editable signals, not a black box</h2>
-          <p className="mt-2 text-sm text-slate-500">
-            Boost what feels right, mute what feels off, and Pulse will reshuffle the venue stack around those edits.
+          <h2 className="text-xl font-semibold text-slate-900">Interest signals</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Boost or mute a theme, then watch the map and shortlist respond around that edit.
           </p>
         </div>
-        <Sparkles className="h-5 w-5 text-accent" />
+        <button
+          type="button"
+          title="More signal sources are coming soon."
+          className="rounded-full border border-stroke bg-white/70 px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-white"
+        >
+          Add signal
+        </button>
       </div>
 
       <div className="mt-5 space-y-3">
@@ -47,7 +52,6 @@ export function InterestProfilePanel({
 
         {topics.map((topic) => {
           const confidencePercent = Math.round(topic.confidence * 100);
-          const stateLabel = topic.muted ? "Muted" : topic.boosted ? "Boosted" : "Active";
           return (
             <article
               key={topic.id}
@@ -58,36 +62,24 @@ export function InterestProfilePanel({
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-base font-semibold text-slate-900">{topic.label}</h3>
-                    <span
-                      className={[
-                        "rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
-                        topic.muted
-                          ? "bg-slate-100 text-slate-500"
-                          : topic.boosted
-                            ? "bg-accentSoft text-accent"
-                            : "bg-slate-100 text-slate-700"
-                      ].join(" ")}
-                    >
-                      {stateLabel}
-                    </span>
-                  </div>
+                  <h3 className="text-base font-semibold text-slate-900">{topic.label}</h3>
                   <p className="mt-2 text-sm text-slate-500">Confidence {confidencePercent}% from observed signals.</p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <ActionButton
-                    label={topic.boosted ? "Boosted" : "Boost"}
+                    label="Boost"
                     active={topic.boosted}
                     disabled={isSaving}
+                    title="Lift venues that match this theme higher in the ranking."
                     onClick={() => onAction(topic.id, "boost")}
                   />
                   <ActionButton
-                    label={topic.muted ? "Muted" : "Mute"}
+                    label="Mute"
                     active={topic.muted}
                     disabled={isSaving}
                     tone="muted"
+                    title="Downrank venues that match this theme."
                     onClick={() => onAction(topic.id, "mute")}
                   />
                   <ActionButton
@@ -95,6 +87,7 @@ export function InterestProfilePanel({
                     active={false}
                     disabled={isSaving || (!topic.boosted && !topic.muted)}
                     tone="ghost"
+                    title="Clear your manual override for this theme."
                     onClick={() => onAction(topic.id, "reset")}
                   />
                 </div>
@@ -124,21 +117,6 @@ export function InterestProfilePanel({
           );
         })}
       </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-3 text-xs uppercase tracking-[0.18em] text-slate-500">
-        <span className="inline-flex items-center gap-2">
-          <Sparkles className="h-3.5 w-3.5" />
-          Boost lifts a theme in ranking.
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <VolumeX className="h-3.5 w-3.5" />
-          Mute downranks matching venues.
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <RotateCcw className="h-3.5 w-3.5" />
-          Reset clears the override.
-        </span>
-      </div>
     </div>
   );
 }
@@ -148,13 +126,15 @@ function ActionButton({
   active,
   disabled,
   onClick,
-  tone = "accent"
+  tone = "accent",
+  title,
 }: {
   label: string;
   active: boolean;
   disabled: boolean;
   onClick: () => void;
   tone?: "accent" | "muted" | "ghost";
+  title: string;
 }) {
   const className =
     tone === "muted"
@@ -172,6 +152,7 @@ function ActionButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
+      title={title}
       className={`rounded-full border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
     >
       {label}

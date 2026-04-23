@@ -153,10 +153,10 @@ export function AccountDock() {
           {isSignedIn ? <UserRound className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
         </span>
         <span className="min-w-0">
-          <span className="block max-w-[11rem] truncate text-sm font-semibold text-slate-900">
-            {isSignedIn ? user?.email : "Account"}
+          <span className="block text-sm font-semibold text-slate-900">Profile</span>
+          <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">
+            {isSignedIn ? status.eyebrow : "Sign in"}
           </span>
-          <span className="block text-xs uppercase tracking-[0.18em] text-slate-500">{status.eyebrow}</span>
         </span>
         {open ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
       </button>
@@ -169,9 +169,7 @@ export function AccountDock() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Account</p>
-              <h3 className="mt-1 text-xl font-semibold text-slate-900">
-                {isSignedIn ? "Stay tucked away" : "Sign in quietly"}
-              </h3>
+              <h3 className="mt-1 text-xl font-semibold text-slate-900">{isSignedIn ? "Profile" : "Sign in quietly"}</h3>
             </div>
             <button
               type="button"
@@ -215,7 +213,7 @@ export function AccountDock() {
             <>
               {isSignedIn ? (
                 <div className="mt-4 space-y-3">
-                  <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-2">
                     {connectionMode !== "live" ? (
                       <button
                         type="button"

@@ -17,3 +17,28 @@ export function formatDigestTime(value: string) {
   const minuteLabel = minute.toString().padStart(2, "0");
   return `${hour12}:${minuteLabel} ${period}`;
 }
+
+export function formatEventStart(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const formatter = new Intl.DateTimeFormat([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const parts = formatter.formatToParts(date);
+  const pick = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  const weekday = pick("weekday");
+  const month = pick("month");
+  const day = pick("day");
+  const hour = pick("hour");
+  const minute = pick("minute");
+  const dayPeriod = pick("dayPeriod");
+
+  return `${weekday} ${month} ${day} · ${hour}:${minute} ${dayPeriod}`.trim();
+}
