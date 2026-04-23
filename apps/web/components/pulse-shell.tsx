@@ -30,6 +30,7 @@ export function PulseShell() {
     queryKey: ["auth-viewer", identityKey],
     queryFn: getAuthViewer
   });
+  const isAuthenticated = Boolean(viewerQuery.data?.isAuthenticated);
 
   const mapQuery = useQuery({
     queryKey: ["map-recommendations", identityKey],
@@ -165,20 +166,33 @@ export function PulseShell() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Setup Rail</p>
-                    <h2 className="mt-1 text-2xl font-semibold">Personalize quietly</h2>
+                    <h2 className="mt-1 text-2xl font-semibold">
+                      {isAuthenticated ? "Already in place" : "Personalize quietly"}
+                    </h2>
                   </div>
                   <span className="rounded-full bg-accentSoft px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">
-                    {viewerQuery.data?.isAuthenticated ? "Live account" : "Ready when you are"}
+                    {isAuthenticated ? "Live account" : "Ready when you are"}
                   </span>
                 </div>
 
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Keep identity and location setup off to the side, then let the map stay center stage.
+                  {isAuthenticated
+                    ? "Your identity is already handled. Keep location and account controls off to the side, then let the map stay center stage."
+                    : "Keep identity and location setup off to the side, then let the map stay center stage."}
                 </p>
 
                 <div className="mt-4 space-y-4">
-                  <MagicLinkCard compact />
-                  <LocationOnboardingCard compact />
+                  {isAuthenticated ? (
+                    <>
+                      <LocationOnboardingCard compact />
+                      <MagicLinkCard compact />
+                    </>
+                  ) : (
+                    <>
+                      <MagicLinkCard compact />
+                      <LocationOnboardingCard compact />
+                    </>
+                  )}
                 </div>
               </aside>
             </div>
