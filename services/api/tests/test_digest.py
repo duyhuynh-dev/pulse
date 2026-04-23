@@ -1,11 +1,13 @@
 import httpx
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from app.schemas.recommendations import RecommendationReason, TravelEstimate, VenueRecommendationCard
 from app.services.digest import (
     _digest_due_now,
     _digest_preheader,
     _digest_subject,
+    _format_event_time,
     _provider_error_detail,
     _render_digest_html,
     _render_digest_text,
@@ -49,7 +51,7 @@ def test_digest_subject_and_preheader_reflect_shortlist() -> None:
 
 
 def test_digest_renderers_include_key_event_details() -> None:
-    user = User(email="duy@example.com", display_name="Duy")
+    user = User(email="duy@example.com", display_name="Duy", timezone="America/New_York")
     items = [_sample_card("Elsewhere", "Bushwick", "After-Hours Techno Showcase")]
 
     html = _render_digest_html(
@@ -57,11 +59,13 @@ def test_digest_renderers_include_key_event_details() -> None:
         items,
         "Pulse Weekly: 1 NYC picks for this week",
         "Elsewhere is leading your latest Pulse shortlist.",
+        ZoneInfo("America/New_York"),
     )
     text = _render_digest_text(
         items,
         "Pulse Weekly: 1 NYC picks for this week",
         "Elsewhere is leading your latest Pulse shortlist.",
+        ZoneInfo("America/New_York"),
     )
 
     assert "Duy, your city picks are ready." in html
@@ -71,6 +75,8 @@ def test_digest_renderers_include_key_event_details() -> None:
     assert "display:inline-block;padding:8px 12px" in html
     assert "Pulse Weekly: 1 NYC picks for this week" in text
     assert "Travel: 18 min walk, 12 min transit" in text
+    assert "Sat, Apr 25 · 7:30 PM" in html
+    assert "Sat, Apr 25 · 7:30 PM" in text
 
 
 def test_provider_error_detail_prefers_json_message() -> None:
@@ -100,3 +106,7 @@ def test_digest_due_now_respects_user_day_time_and_timezone() -> None:
     assert _digest_due_now(user, preference, due_now) is True
     assert _digest_due_now(user, preference, too_late) is False
     assert _digest_due_now(user, preference, wrong_day) is False
+
+
+def test_format_event_time_converts_to_user_timezone() -> None:
+    assert _format_event_time("2026-04-28T00:30:00+00:00", ZoneInfo("America/New_York")) == "Mon, Apr 27 · 8:30 PM"

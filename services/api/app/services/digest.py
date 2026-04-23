@@ -36,8 +36,9 @@ async def build_digest_preview(session: AsyncSession, user: User) -> DigestPrevi
 
     subject = _digest_subject(items)
     preheader = _digest_preheader(items)
-    html = _render_digest_html(user, items, subject, preheader)
-    text = _render_digest_text(items, subject, preheader)
+    timezone = _user_timezone(user)
+    html = _render_digest_html(user, items, subject, preheader, timezone)
+    text = _render_digest_text(items, subject, preheader, timezone)
 
     return DigestPreviewPayload(
         run=run,
@@ -188,11 +189,12 @@ def _render_digest_html(
     items: list[VenueRecommendationCard],
     subject: str,
     preheader: str,
+    timezone: ZoneInfo,
 ) -> str:
     settings = get_settings()
     intro_name = user.display_name or user.email.split("@")[0]
     cards_html = "".join(
-        f'<div style="margin-top:{0 if index == 0 else 16}px;">{_render_card_html(item)}</div>'
+        f'<div style="margin-top:{0 if index == 0 else 16}px;">{_render_card_html(item, timezone)}</div>'
         for index, item in enumerate(items)
     )
     return f"""<!DOCTYPE html>
@@ -226,7 +228,7 @@ def _render_digest_html(
 </html>"""
 
 
-def _render_card_html(item: VenueRecommendationCard) -> str:
+def _render_card_html(item: VenueRecommendationCard, timezone: ZoneInfo) -> str:
     reasons = "".join(
         f"<li style=\"margin:0 0 6px;\">"
         f"<span style=\"font-weight:600;color:#14213d;\">{escape(reason.title)}:</span> {escape(reason.detail)}</li>"
@@ -250,7 +252,7 @@ def _render_card_html(item: VenueRecommendationCard) -> str:
           </tr>
         </table>
         <p style="margin:16px 0 0;color:#4a6078;font-size:14px;line-height:1.7;">
-          {escape(_format_event_time(item.startsAt))} · {escape(item.priceLabel)} · {escape(item.address)}
+          {escape(_format_event_time(item.startsAt, timezone))} · {escape(item.priceLabel)} · {escape(item.address)}
         </p>
         <p style="margin:8px 0 0;color:#4a6078;font-size:14px;line-height:1.7;">{travel}</p>
         <ul style="margin:16px 0 0;padding-left:18px;color:#4a6078;font-size:14px;line-height:1.7;">{reasons}</ul>
@@ -262,13 +264,14 @@ def _render_digest_text(
     items: list[VenueRecommendationCard],
     subject: str,
     preheader: str,
+    timezone: ZoneInfo,
 ) -> str:
     lines = [subject, preheader, ""]
     for index, item in enumerate(items, start=1):
         lines.extend(
             [
                 f"{index}. {item.venueName} — {item.eventTitle}",
-                f"   {item.neighborhood} · {_format_event_time(item.startsAt)} · {item.priceLabel}",
+                f"   {item.neighborhood} · {_format_event_time(item.startsAt, timezone)} · {item.priceLabel}",
                 f"   {item.address}",
             ]
         )
@@ -281,12 +284,12 @@ def _render_digest_text(
     return "\n".join(lines).strip()
 
 
-def _format_event_time(value: str) -> str:
+def _format_event_time(value: str, timezone: ZoneInfo) -> str:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return value
-    return parsed.strftime("%a, %b %-d · %-I:%M %p")
+    return parsed.astimezone(timezone).strftime("%a, %b %-d · %-I:%M %p")
 
 
 def _user_timezone(user: User) -> ZoneInfo:

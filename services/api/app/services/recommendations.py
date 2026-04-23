@@ -525,6 +525,10 @@ def _archive_title(kind: str) -> str:
     return "Current shortlist"
 
 
+def _display_timezone(user: User) -> str:
+    return user.timezone or "America/New_York"
+
+
 def _deletable_run_ids(run_ids: list[str], protected_run_ids: set[str]) -> list[str]:
     return [run_id for run_id in run_ids if run_id not in protected_run_ids]
 
@@ -548,6 +552,21 @@ def _run_context_changed(
 
     constraint_updated_at = constraints.updated_at or constraints.created_at
     return _timestamp_utc(constraint_updated_at) > run_created_at
+
+
+async def _catalog_changed_since(
+    session: AsyncSession,
+    run: RecommendationRun,
+) -> bool:
+    latest_occurrence_update = await session.scalar(
+        select(EventOccurrence.updated_at)
+        .where(EventOccurrence.is_active.is_(True))
+        .order_by(desc(EventOccurrence.updated_at))
+        .limit(1)
+    )
+    if latest_occurrence_update is None:
+        return False
+    return _timestamp_utc(latest_occurrence_update) > _timestamp_utc(run.created_at)
 
 
 async def _replace_user_runs(session: AsyncSession, user_id: str) -> None:
@@ -590,6 +609,7 @@ async def refresh_recommendations_for_user(
         and not force
         and not _run_is_stale(existing_run)
         and not _run_context_changed(existing_run, anchor, constraints)
+        and not await _catalog_changed_since(session, existing_run)
     ):
         return existing_run
 
@@ -695,12 +715,13 @@ async def refresh_recommendations_for_user(
     return run
 
 
-def _empty_response() -> RecommendationsMapResponse:
+def _empty_response(display_timezone: str = "America/New_York") -> RecommendationsMapResponse:
     return RecommendationsMapResponse(
         viewport=DEFAULT_VIEWPORT,
         pins=[],
         cards={},
         generatedAt="",
+        displayTimezone=display_timezone,
         userConstraint={},
     )
 
@@ -776,21 +797,23 @@ async def get_map_recommendations(
     session: AsyncSession,
     user: User,
 ) -> RecommendationsMapResponse:
+    display_timezone = _display_timezone(user)
     run = await refresh_recommendations_for_user(session, user)
     if run is None:
-        return _empty_response()
+        return _empty_response(display_timezone)
 
     anchor = await _user_anchor(session, user.id)
     constraints = await _user_constraints(session, user.id)
     pins, items, cards = await _cards_for_run(session, run)
     if not items:
-        return _empty_response()
+        return _empty_response(display_timezone)
 
     return RecommendationsMapResponse(
         viewport=run.viewport_json,
         pins=pins,
         cards=cards,
         generatedAt=run.created_at.isoformat(),
+        displayTimezone=display_timezone,
         userConstraint={
             "city": constraints.city if constraints else "New York City",
             "neighborhood": constraints.neighborhood if constraints else None,
@@ -804,9 +827,10 @@ async def get_map_recommendations(
 
 
 async def get_archive(session: AsyncSession, user: User) -> ArchiveResponse:
+    display_timezone = _display_timezone(user)
     latest_run = await refresh_recommendations_for_user(session, user)
     if latest_run is None:
-        return ArchiveResponse(items=[], history=[])
+        return ArchiveResponse(items=[], history=[], displayTimezone=display_timezone)
 
     _, items, _ = await _cards_for_run(session, latest_run)
 
@@ -851,7 +875,7 @@ async def get_archive(session: AsyncSession, user: User) -> ArchiveResponse:
         )
         seen_run_ids.add(run.id)
 
-    return ArchiveResponse(items=items, history=snapshots)
+    return ArchiveResponse(items=items, history=snapshots, displayTimezone=display_timezone)
 
 
 def _price_label(min_price: float | None, max_price: float | None) -> str:

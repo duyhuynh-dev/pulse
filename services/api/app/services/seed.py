@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +29,7 @@ from app.services.recommendations import refresh_recommendations_for_user
 
 DEMO_SOURCE_NAME = "Pulse Demo Source"
 DEFAULT_ORIGIN = (40.7315, -73.9897)
+NYC_TZ = ZoneInfo("America/New_York")
 
 DEMO_TOPICS = [
     {
@@ -139,6 +141,28 @@ DEMO_EVENT_SPECS = [
         "topic_keys": ["indie_live_music"],
     },
 ]
+
+DEMO_EVENT_SLOTS = [
+    (3, 21, 0),   # Thursday 9:00 PM
+    (4, 20, 30),  # Friday 8:30 PM
+    (5, 19, 30),  # Saturday 7:30 PM
+]
+
+
+def _next_demo_local_start(
+    weekday: int,
+    hour: int,
+    minute: int,
+    *,
+    now_local: datetime | None = None,
+) -> datetime:
+    current_local = now_local or datetime.now(tz=NYC_TZ)
+    days_ahead = (weekday - current_local.weekday()) % 7
+    candidate_date = current_local.date() + timedelta(days=days_ahead)
+    candidate = datetime.combine(candidate_date, time(hour=hour, minute=minute), tzinfo=NYC_TZ)
+    if candidate <= current_local:
+        candidate += timedelta(days=7)
+    return candidate.astimezone(UTC)
 
 async def seed_demo_state(session: AsyncSession, only_missing: bool = False) -> None:
     settings = get_settings()
@@ -308,10 +332,10 @@ async def ensure_demo_catalog(session: AsyncSession) -> tuple[list[Venue], list[
 
     await session.flush()
 
+    now_local = datetime.now(tz=NYC_TZ)
     starts = [
-        datetime.now(tz=UTC) + timedelta(days=2, hours=6),
-        datetime.now(tz=UTC) + timedelta(days=3, hours=7),
-        datetime.now(tz=UTC) + timedelta(days=4, hours=5),
+        _next_demo_local_start(weekday, hour, minute, now_local=now_local)
+        for weekday, hour, minute in DEMO_EVENT_SLOTS
     ]
 
     occurrences: list[EventOccurrence] = []

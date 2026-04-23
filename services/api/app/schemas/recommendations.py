@@ -55,6 +55,7 @@ class RecommendationsMapResponse(BaseModel):
     pins: list[MapVenuePin]
     cards: dict[str, VenueRecommendationCard]
     generatedAt: str
+    displayTimezone: str = "America/New_York"
     userConstraint: dict
 
 
@@ -69,6 +70,7 @@ class ArchiveSnapshot(BaseModel):
 
 class ArchiveResponse(BaseModel):
     items: list[VenueRecommendationCard]
+    displayTimezone: str = "America/New_York"
     history: list[ArchiveSnapshot] = Field(default_factory=list)
 
 

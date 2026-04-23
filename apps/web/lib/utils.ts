@@ -18,13 +18,34 @@ export function formatDigestTime(value: string) {
   return `${hour12}:${minuteLabel} ${period}`;
 }
 
-export function formatEventStart(value: string) {
+export function formatTimestamp(value: string | null | undefined, timezone = "America/New_York") {
+  if (!value) {
+    return null;
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
 
   const formatter = new Intl.DateTimeFormat([], {
+    timeZone: timezone,
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return formatter.format(date);
+}
+
+export function formatEventStart(value: string, timezone = "America/New_York") {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const formatter = new Intl.DateTimeFormat([], {
+    timeZone: timezone,
     weekday: "short",
     month: "short",
     day: "numeric",

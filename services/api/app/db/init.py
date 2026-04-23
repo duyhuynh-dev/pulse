@@ -3,7 +3,7 @@ from sqlalchemy import select
 from app.db.base import Base
 from app.db.session import AsyncSessionLocal, engine
 from app.models.user import EmailPreference, User
-from app.services.seed import seed_demo_state
+from app.services.seed import ensure_demo_catalog, seed_demo_state
 
 
 async def init_db() -> None:
@@ -18,3 +18,5 @@ async def init_db() -> None:
             preference = await session.scalar(select(EmailPreference).where(EmailPreference.user_id == user.id))
             if preference is None:
                 await seed_demo_state(session, only_missing=True)
+        await ensure_demo_catalog(session)
+        await session.commit()

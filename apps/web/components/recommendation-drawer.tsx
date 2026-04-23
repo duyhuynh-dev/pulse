@@ -8,6 +8,7 @@ import { formatEventStart } from "@/lib/utils";
 export function RecommendationDrawer({
   loading,
   cards,
+  timezone,
   selectedVenueId,
   onSelectVenue,
   onSave,
@@ -15,6 +16,7 @@ export function RecommendationDrawer({
 }: {
   loading: boolean;
   cards: Record<string, VenueRecommendationCard>;
+  timezone: string;
   selectedVenueId: string | null;
   onSelectVenue: (venueId: string) => void;
   onSave: (card: VenueRecommendationCard) => void;
@@ -87,7 +89,7 @@ export function RecommendationDrawer({
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                <span>{formatEventStart(card.startsAt)}</span>
+                <span>{formatEventStart(card.startsAt, timezone)}</span>
                 <span>{card.priceLabel}</span>
                 <span className="inline-flex items-center gap-1">
                   <MapPin className="h-4 w-4" />

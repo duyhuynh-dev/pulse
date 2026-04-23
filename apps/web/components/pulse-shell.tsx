@@ -184,15 +184,15 @@ export function PulseShell() {
 
         <section className="relative z-0 grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.58fr)_minmax(23rem,0.82fr)]">
           <div className="flex min-h-[58vh] min-w-0 flex-col overflow-hidden rounded-[2rem] border border-stroke/80 bg-card/80 shadow-float">
-            <div className="flex flex-col gap-4 border-b border-stroke/70 bg-white/84 px-5 py-4 backdrop-blur">
-              <div className="max-w-2xl">
+            <div className="flex items-center justify-between gap-6 border-b border-stroke/70 bg-white/84 px-5 py-4 backdrop-blur">
+              <div className="min-w-0 max-w-2xl">
                 <p className="text-sm font-medium uppercase tracking-[0.22em] text-slate-500">This week on the map</p>
                 <h1 className="mt-2 text-2xl font-semibold leading-tight text-slate-900">
                   {mapQuery.data?.pins.length ? `${mapQuery.data.pins.length} venues leading right now` : "Waiting on recommendations"}
                 </h1>
               </div>
 
-              <div className="flex flex-wrap items-center justify-center gap-2">
+              <div className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap">
                 <button
                   type="button"
                   onClick={() => digestPreviewMutation.mutate()}
@@ -248,6 +248,7 @@ export function PulseShell() {
             <RecommendationDrawer
               loading={mapQuery.isLoading}
               cards={mapQuery.data?.cards ?? {}}
+              timezone={mapQuery.data?.displayTimezone ?? "America/New_York"}
               selectedVenueId={selectedVenueId}
               onSelectVenue={setSelectedVenueId}
               onSave={(card) =>

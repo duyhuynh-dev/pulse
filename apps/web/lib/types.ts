@@ -85,6 +85,7 @@ export interface RecommendationsMapResponse {
   pins: MapVenuePin[];
   cards: Record<string, VenueRecommendationCard>;
   generatedAt: string;
+  displayTimezone: string;
   userConstraint: UserConstraint;
 }
 
@@ -99,6 +100,7 @@ export interface ArchiveSnapshot {
 
 export interface ArchiveResponse {
   items: VenueRecommendationCard[];
+  displayTimezone: string;
   history: ArchiveSnapshot[];
 }
 

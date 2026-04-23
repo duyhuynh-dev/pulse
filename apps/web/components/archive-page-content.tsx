@@ -4,27 +4,18 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { getArchive } from "@/lib/api";
 import type { ArchiveSnapshot, VenueRecommendationCard } from "@/lib/types";
-
-function formatStamp(value: string | null | undefined) {
-  if (!value) {
-    return null;
-  }
-  return new Date(value).toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
+import { formatEventStart, formatTimestamp } from "@/lib/utils";
 
 function SnapshotSection({
   title,
   subtitle,
   items,
+  timezone,
 }: {
   title: string;
   subtitle: string;
   items: VenueRecommendationCard[];
+  timezone: string;
 }) {
   return (
     <section className="rounded-[1.75rem] border border-stroke bg-white/75 p-5">
@@ -45,7 +36,7 @@ function SnapshotSection({
             <h3 className="mt-2 text-2xl font-semibold">{item.venueName}</h3>
             <p className="mt-1 text-slate-700">{item.eventTitle}</p>
             <div className="mt-3 flex flex-wrap gap-2 text-sm text-slate-600">
-              <span>{new Date(item.startsAt).toLocaleString()}</span>
+              <span>{formatEventStart(item.startsAt, timezone)}</span>
               <span>{item.priceLabel}</span>
               {item.travel.map((travel) => (
                 <span key={`${item.eventId}-${travel.mode}`} className="rounded-full bg-canvas px-3 py-1">
@@ -60,9 +51,9 @@ function SnapshotSection({
   );
 }
 
-function snapshotSubtitle(snapshot: ArchiveSnapshot) {
-  const delivered = formatStamp(snapshot.deliveredAt);
-  const generated = formatStamp(snapshot.generatedAt);
+function snapshotSubtitle(snapshot: ArchiveSnapshot, timezone: string) {
+  const delivered = formatTimestamp(snapshot.deliveredAt, timezone);
+  const generated = formatTimestamp(snapshot.generatedAt, timezone);
   if (snapshot.kind === "scheduled" && delivered) {
     return `Sent to your inbox on ${delivered}.`;
   }
@@ -80,6 +71,7 @@ export function ArchivePageContent() {
     queryKey: ["archive"],
     queryFn: getArchive
   });
+  const timezone = archiveQuery.data?.displayTimezone ?? "America/New_York";
 
   return (
     <main className="min-h-screen px-4 py-6 md:px-6">
@@ -100,6 +92,7 @@ export function ArchivePageContent() {
               title="Current shortlist"
               subtitle="This is the live recommendation stack behind your map right now."
               items={archiveQuery.data.items}
+              timezone={timezone}
             />
           )}
 
@@ -107,8 +100,9 @@ export function ArchivePageContent() {
             <SnapshotSection
               key={snapshot.runId}
               title={snapshot.title}
-              subtitle={snapshotSubtitle(snapshot)}
+              subtitle={snapshotSubtitle(snapshot, timezone)}
               items={snapshot.items}
+              timezone={timezone}
             />
           ))}
 
