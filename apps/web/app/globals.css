@@ -42,16 +42,13 @@ body {
   color: #0f172a;
   cursor: pointer;
   padding: 0.48rem 0.82rem 0.48rem 0.5rem;
-  transform: translateY(0);
   transition:
-    transform 160ms ease,
     box-shadow 160ms ease,
     border-color 160ms ease,
     background-color 160ms ease;
 }
 
 .pulse-map-marker:hover {
-  transform: translateY(-1px);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
 }
 
