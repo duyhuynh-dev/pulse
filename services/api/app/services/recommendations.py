@@ -23,6 +23,12 @@ DEFAULT_VIEWPORT = {
     "latitudeDelta": 0.22,
     "longitudeDelta": 0.22,
 }
+NYC_SERVICE_AREA = {
+    "min_latitude": 40.45,
+    "max_latitude": 40.95,
+    "min_longitude": -74.35,
+    "max_longitude": -73.65,
+}
 RECOMMENDATION_MAX_AGE = timedelta(minutes=30)
 TOPIC_KEYWORD_MAP = {
     "underground_dance": ["techno", "warehouse", "club", "dance", "rave", "dj"],
@@ -42,16 +48,47 @@ async def _latest_run(session: AsyncSession, user_id: str) -> RecommendationRun 
 
 
 async def _user_anchor(session: AsyncSession, user_id: str) -> UserAnchorLocation | None:
-    return await session.scalar(
-        select(UserAnchorLocation)
-        .where(UserAnchorLocation.user_id == user_id)
-        .order_by(desc(UserAnchorLocation.created_at))
-        .limit(1)
+    anchors = list(
+        (
+            await session.scalars(
+                select(UserAnchorLocation)
+                .where(UserAnchorLocation.user_id == user_id)
+                .order_by(desc(UserAnchorLocation.created_at))
+            )
+        ).all()
     )
+    return _select_active_anchor(anchors)
 
 
 async def _user_constraints(session: AsyncSession, user_id: str) -> UserConstraint | None:
     return await session.scalar(select(UserConstraint).where(UserConstraint.user_id == user_id).limit(1))
+
+
+def _timestamp_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _within_nyc_service_area(latitude: float, longitude: float) -> bool:
+    return (
+        NYC_SERVICE_AREA["min_latitude"] <= latitude <= NYC_SERVICE_AREA["max_latitude"]
+        and NYC_SERVICE_AREA["min_longitude"] <= longitude <= NYC_SERVICE_AREA["max_longitude"]
+    )
+
+
+def _select_active_anchor(anchors: list[UserAnchorLocation]) -> UserAnchorLocation | None:
+    if not anchors:
+        return None
+
+    for anchor in anchors:
+        if anchor.latitude is not None and anchor.longitude is not None:
+            if _within_nyc_service_area(anchor.latitude, anchor.longitude):
+                return anchor
+            continue
+
+        if anchor.zip_code or anchor.neighborhood:
+            return anchor
+
+    return anchors[0]
 
 
 def _anchor_coordinates(anchor: UserAnchorLocation | None) -> tuple[float, float]:
@@ -283,10 +320,24 @@ def _secondary_events_payload(entries: list[dict]) -> list[dict]:
 
 
 def _run_is_stale(run: RecommendationRun) -> bool:
-    created_at = run.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=UTC)
-    return datetime.now(tz=UTC) - created_at >= RECOMMENDATION_MAX_AGE
+    return datetime.now(tz=UTC) - _timestamp_utc(run.created_at) >= RECOMMENDATION_MAX_AGE
+
+
+def _run_context_changed(
+    run: RecommendationRun,
+    anchor: UserAnchorLocation | None,
+    constraints: UserConstraint | None,
+) -> bool:
+    run_created_at = _timestamp_utc(run.created_at)
+
+    if anchor is not None and _timestamp_utc(anchor.created_at) > run_created_at:
+        return True
+
+    if constraints is None:
+        return False
+
+    constraint_updated_at = constraints.updated_at or constraints.created_at
+    return _timestamp_utc(constraint_updated_at) > run_created_at
 
 
 async def _replace_user_runs(session: AsyncSession, user_id: str) -> None:
@@ -308,12 +359,17 @@ async def refresh_recommendations_for_user(
     provider: str = "catalog",
     model_name: str = "pulse-deterministic-v1",
 ) -> RecommendationRun:
-    existing_run = await _latest_run(session, user.id)
-    if existing_run is not None and not force and not _run_is_stale(existing_run):
-        return existing_run
-
     anchor = await _user_anchor(session, user.id)
     constraints = await _user_constraints(session, user.id)
+    existing_run = await _latest_run(session, user.id)
+    if (
+        existing_run is not None
+        and not force
+        and not _run_is_stale(existing_run)
+        and not _run_context_changed(existing_run, anchor, constraints)
+    ):
+        return existing_run
+
     origin_latitude, origin_longitude = _anchor_coordinates(anchor)
     viewport = _viewport_for_anchor(anchor)
     topic_rows = (
@@ -427,7 +483,6 @@ async def get_map_recommendations(
 
     anchor = await _user_anchor(session, user.id)
     constraints = await _user_constraints(session, user.id)
-    origin_latitude, origin_longitude = _anchor_coordinates(anchor)
 
     recommendation_rows = (
         await session.scalars(
@@ -449,9 +504,9 @@ async def get_map_recommendations(
         if not venue or not occurrence or not event:
             continue
 
-        travel = estimate_travel_bands(
-            origin_latitude,
-            origin_longitude,
+        travel = recommendation.travel_json or estimate_travel_bands(
+            DEFAULT_VIEWPORT["latitude"],
+            DEFAULT_VIEWPORT["longitude"],
             venue.latitude,
             venue.longitude,
         )

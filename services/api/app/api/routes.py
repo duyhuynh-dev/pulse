@@ -234,7 +234,8 @@ async def profile_anchor(
             is_session_only=payload.source == "live",
         )
     )
-    await session.commit()
+    await session.flush()
+    await refresh_recommendations_for_user(session, user, force=True)
     return OkResponse()
 
 
@@ -256,7 +257,8 @@ async def profile_constraints(
     constraint.budget_level = payload.budgetLevel
     constraint.preferred_days_csv = ",".join(payload.preferredDays)
     constraint.social_mode = payload.socialMode
-    await session.commit()
+    await session.flush()
+    await refresh_recommendations_for_user(session, user, force=True)
     return OkResponse()
 
 
