@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MapPinned, Compass, CalendarDays } from "lucide-react";
 import {
+  sendDigestPreview,
   getAuthViewer,
   getInterests,
   getMapRecommendations,
@@ -25,7 +26,7 @@ export function PulseShell() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
-  const [supplyStatus, setSupplyStatus] = useState<string | null>(null);
+  const [surfaceStatus, setSurfaceStatus] = useState<string | null>(null);
   const identityKey = user?.id ?? "demo";
 
   const viewerQuery = useQuery({
@@ -80,12 +81,22 @@ export function PulseShell() {
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ["map-recommendations"] });
       void queryClient.invalidateQueries({ queryKey: ["archive"] });
-      setSupplyStatus(
+      setSurfaceStatus(
         `Synced ${data.candidateCount} candidates and saved ${data.accepted} fresh events into the catalog.`,
       );
     },
     onError: (error) => {
-      setSupplyStatus(error instanceof Error ? error.message : "Unable to sync fresh venue supply right now.");
+      setSurfaceStatus(error instanceof Error ? error.message : "Unable to sync fresh venue supply right now.");
+    }
+  });
+
+  const digestPreviewMutation = useMutation({
+    mutationFn: sendDigestPreview,
+    onSuccess: (data) => {
+      setSurfaceStatus(`Sent a digest preview to ${data.recipientEmail}.`);
+    },
+    onError: (error) => {
+      setSurfaceStatus(error instanceof Error ? error.message : "Unable to send the digest preview right now.");
     }
   });
 
@@ -237,14 +248,25 @@ export function PulseShell() {
                 <p className="mt-2 text-sm text-slate-500">
                   {syncSupplyMutation.isPending
                     ? "Syncing live venue supply before recomputing your shortlist..."
-                    : supplyStatus ?? "Refresh picks reranks what is already saved. Sync supply also pulls fresh event inventory first."}
+                    : digestPreviewMutation.isPending
+                      ? "Packaging this week’s shortlist into a manual preview email..."
+                      : surfaceStatus ?? "Refresh picks reranks what is already saved. Sync supply pulls fresh inventory first, and Send preview emails the current shortlist to you."}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => digestPreviewMutation.mutate()}
+                  disabled={!isAuthenticated || digestPreviewMutation.isPending}
+                  className="rounded-full border border-stroke bg-white/70 px-4 py-2 text-sm text-slate-700 transition hover:bg-white disabled:opacity-60"
+                  title={isAuthenticated ? "Send a manual digest preview to your signed-in email." : "Sign in to email a digest preview."}
+                >
+                  {digestPreviewMutation.isPending ? "Sending preview..." : "Send preview"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => syncSupplyMutation.mutate()}
-                  disabled={syncSupplyMutation.isPending}
+                  disabled={syncSupplyMutation.isPending || digestPreviewMutation.isPending}
                   className="rounded-full border border-stroke bg-white/70 px-4 py-2 text-sm text-slate-700 transition hover:bg-white disabled:opacity-60"
                 >
                   {syncSupplyMutation.isPending ? "Syncing supply..." : "Sync supply"}
@@ -252,7 +274,7 @@ export function PulseShell() {
                 <button
                   type="button"
                   onClick={() => refreshMutation.mutate()}
-                  disabled={refreshMutation.isPending || syncSupplyMutation.isPending}
+                  disabled={refreshMutation.isPending || syncSupplyMutation.isPending || digestPreviewMutation.isPending}
                   className="rounded-full border border-stroke bg-white/70 px-4 py-2 text-sm text-slate-700 transition hover:bg-white disabled:opacity-60"
                 >
                   {refreshMutation.isPending ? "Refreshing..." : "Refresh picks"}

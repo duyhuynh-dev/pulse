@@ -1,6 +1,8 @@
 import type {
   ArchiveResponse,
   AuthViewer,
+  DigestPreviewResponse,
+  DigestSendResponse,
   FeedbackReason,
   InterestTopic,
   LocationAnchorPayload,
@@ -68,6 +70,16 @@ export function refreshRecommendations() {
 
 export function syncSupply() {
   return request<SupplySyncResponse>("/v1/supply/sync", {
+    method: "POST"
+  });
+}
+
+export function getDigestPreview() {
+  return request<DigestPreviewResponse>("/v1/digest/preview");
+}
+
+export function sendDigestPreview() {
+  return request<DigestSendResponse>("/v1/digest/send-preview", {
     method: "POST"
   });
 }

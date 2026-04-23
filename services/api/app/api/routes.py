@@ -12,6 +12,7 @@ from app.models.recommendation import FeedbackEvent
 from app.models.user import OAuthConnection, UserAnchorLocation, UserConstraint
 from app.schemas.auth import AuthViewerResponse, RedditConnectStartResponse
 from app.schemas.common import OkResponse, SupplySyncResponse
+from app.schemas.digest import DigestPreviewResponse, DigestSendResponse
 from app.schemas.ingestion import CandidateIngestPayload, CandidateIngestResponse
 from app.schemas.maps import MapTokenResponse
 from app.schemas.profile import AnchorPayload, InterestListResponse, InterestListUpdate, UserConstraintPayload
@@ -24,6 +25,7 @@ from app.services.auth import (
     require_authenticated_user,
     resolve_user,
 )
+from app.services.digest import build_digest_preview, send_digest_preview
 from app.services.ingestion import upsert_ingested_candidates
 from app.services.profile import list_interests, update_interests
 from app.services.recommendations import get_archive, get_map_recommendations, refresh_recommendations_for_user
@@ -302,6 +304,32 @@ async def recommendations_archive(
     user=Depends(current_user),
 ) -> ArchiveResponse:
     return await get_archive(session, user)
+
+
+@router.get("/digest/preview", response_model=DigestPreviewResponse)
+async def digest_preview(
+    session: AsyncSession = Depends(get_db),
+    identity=Depends(authenticated_identity),
+) -> DigestPreviewResponse:
+    try:
+        preview = await build_digest_preview(session, identity.user)
+    except RuntimeError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    return preview.response
+
+
+@router.post("/digest/send-preview", response_model=DigestSendResponse)
+async def digest_send_preview(
+    session: AsyncSession = Depends(get_db),
+    identity=Depends(authenticated_identity),
+) -> DigestSendResponse:
+    try:
+        return await send_digest_preview(session, identity.user)
+    except RuntimeError as error:
+        status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        if "No recommendations are available yet" in str(error):
+            status_code = status.HTTP_409_CONFLICT
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
 
 
 @router.post("/recommendations/{recommendation_id}/feedback", response_model=OkResponse)

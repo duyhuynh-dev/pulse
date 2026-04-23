@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     oauth_state_secret: str = ""
     internal_ingest_secret: str = ""
+    resend_api_key: str = ""
+    digest_from_email: str = "Pulse <onboarding@resend.dev>"
 
     reddit_client_id: str = ""
     reddit_client_secret: str = ""

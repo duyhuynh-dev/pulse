@@ -110,3 +110,20 @@ export interface SupplySyncResponse {
   occurrencesCreated: number;
   status: string;
 }
+
+export interface DigestPreviewResponse {
+  recipientEmail: string;
+  subject: string;
+  preheader: string;
+  html: string;
+  text: string;
+  generatedAt: string;
+  items: VenueRecommendationCard[];
+}
+
+export interface DigestSendResponse {
+  ok: boolean;
+  recipientEmail: string;
+  provider: string;
+  status: string;
+}
