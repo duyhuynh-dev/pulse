@@ -101,6 +101,12 @@ async def auth_me(
             OAuthConnection.provider == "reddit_mock",
         )
     )
+    spotify_connection = await session.scalar(
+        select(OAuthConnection).where(
+            OAuthConnection.user_id == identity.user.id,
+            OAuthConnection.provider == "spotify",
+        )
+    )
     connection_mode = "live" if live_connection else "sample" if sample_connection else "none"
     return AuthViewerResponse(
         email=identity.user.email,
@@ -109,6 +115,7 @@ async def auth_me(
         isDemo=identity.is_demo,
         redditConnected=connection_mode != "none",
         redditConnectionMode=connection_mode,
+        spotifyConnected=spotify_connection is not None,
     )
 
 

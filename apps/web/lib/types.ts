@@ -78,6 +78,43 @@ export interface AuthViewer {
   isDemo: boolean;
   redditConnected: boolean;
   redditConnectionMode: "none" | "live" | "sample";
+  spotifyConnected: boolean;
+}
+
+export interface ThemeEvidenceCount {
+  key: string;
+  count: number;
+}
+
+export interface ThemeEvidenceSnippet {
+  type: string;
+  subreddit?: string | null;
+  snippet: string;
+  permalink?: string | null;
+}
+
+export interface ThemeEvidence {
+  matchedSubreddits: ThemeEvidenceCount[];
+  matchedKeywords: ThemeEvidenceCount[];
+  topExamples: ThemeEvidenceSnippet[];
+  providerNotes: string[];
+}
+
+export interface TasteTheme {
+  id: string;
+  label: string;
+  confidence: number;
+  confidenceLabel: string;
+  evidence: ThemeEvidence;
+}
+
+export interface TasteProfileResponse {
+  source: string;
+  sourceKey: string;
+  username?: string | null;
+  generatedAt: string;
+  themes: TasteTheme[];
+  unmatchedActivity: Record<string, unknown>;
 }
 
 export interface RecommendationsMapResponse {

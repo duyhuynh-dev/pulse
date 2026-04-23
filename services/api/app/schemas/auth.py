@@ -8,6 +8,7 @@ class AuthViewerResponse(BaseModel):
     isDemo: bool
     redditConnected: bool
     redditConnectionMode: str = "none"
+    spotifyConnected: bool = False
 
 
 class RedditConnectStartResponse(BaseModel):

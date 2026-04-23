@@ -6,13 +6,21 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Disc3,
   Link2,
   LogOut,
   Mail,
   ShieldCheck,
   X,
 } from "lucide-react";
-import { getAuthViewer, startMockRedditConnection, startRedditConnection } from "@/lib/api";
+import {
+  applySpotifyTaste,
+  getAuthViewer,
+  getSpotifyTastePreview,
+  startMockRedditConnection,
+  startRedditConnection,
+  startSpotifyConnection,
+} from "@/lib/api";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/components/auth-provider";
 
@@ -46,10 +54,11 @@ export function AccountDock() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("Send a magic link to unlock personalized digests, saved account state, and Reddit connection.");
+  const [message, setMessage] = useState("Send a magic link to unlock personalized digests, saved account state, and provider connections.");
   const [showSwitchForm, setShowSwitchForm] = useState(false);
   const [isConnectingReddit, setIsConnectingReddit] = useState(false);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
+  const [isConnectingSpotify, setIsConnectingSpotify] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const supabase = getSupabaseBrowserClient();
@@ -62,6 +71,13 @@ export function AccountDock() {
   const isSignedIn = Boolean(session && !isLoading);
   const connectionMode = viewerQuery.data?.redditConnectionMode ?? "none";
   const status = statusCopy(connectionMode, isSignedIn);
+  const spotifyConnected = Boolean(viewerQuery.data?.spotifyConnected);
+
+  const spotifyPreviewQuery = useQuery({
+    queryKey: ["spotify-taste-preview", user?.id ?? "demo"],
+    queryFn: getSpotifyTastePreview,
+    enabled: isSignedIn && spotifyConnected,
+  });
 
   useEffect(() => {
     if (!open) {
@@ -92,6 +108,36 @@ export function AccountDock() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const spotifyStatus = searchParams.get("spotify");
+    if (spotifyStatus !== "connected") {
+      return;
+    }
+
+    setOpen(true);
+    setMessage("Spotify connected. Review the inferred taste themes and apply them when they look right.");
+    void queryClient.invalidateQueries({ queryKey: ["auth-viewer"] });
+    void queryClient.invalidateQueries({ queryKey: ["spotify-taste-preview"] });
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [queryClient]);
+
+  useEffect(() => {
+    if (!spotifyPreviewQuery.error) {
+      return;
+    }
+
+    setMessage(
+      spotifyPreviewQuery.error instanceof Error
+        ? spotifyPreviewQuery.error.message
+        : "Unable to read a Spotify taste preview right now.",
+    );
+  }, [spotifyPreviewQuery.error]);
 
   const sendMagicLink = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -147,6 +193,38 @@ export function AccountDock() {
       setMessage(error instanceof Error ? error.message : "Unable to attach the sample profile.");
     } finally {
       setIsLoadingSample(false);
+    }
+  };
+
+  const connectSpotify = async () => {
+    if (!session) {
+      setMessage("Sign in first so Pulse can attach the Spotify connection to your account.");
+      return;
+    }
+
+    setIsConnectingSpotify(true);
+    try {
+      const response = await startSpotifyConnection();
+      window.location.assign(response.authorizeUrl);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to start Spotify connection.");
+      setIsConnectingSpotify(false);
+    }
+  };
+
+  const applySpotifyProfile = async () => {
+    try {
+      await applySpotifyTaste();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["auth-viewer"] }),
+        queryClient.invalidateQueries({ queryKey: ["interests"] }),
+        queryClient.invalidateQueries({ queryKey: ["map-recommendations"] }),
+        queryClient.invalidateQueries({ queryKey: ["archive"] }),
+        queryClient.invalidateQueries({ queryKey: ["spotify-taste-preview"] }),
+      ]);
+      setMessage("Spotify taste applied. The map and signals just refreshed with the new provider profile.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to apply the Spotify taste profile.");
     }
   };
 
@@ -217,6 +295,28 @@ export function AccountDock() {
               {isSignedIn ? (
                 <div className="mt-4 space-y-3">
                 <div className="grid gap-2 sm:grid-cols-2">
+                  {!spotifyConnected ? (
+                    <button
+                      type="button"
+                      onClick={() => void connectSpotify()}
+                      disabled={isConnectingSpotify}
+                      className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      <Disc3 className="h-4 w-4" />
+                      {isConnectingSpotify ? "Redirecting..." : "Connect Spotify"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void applySpotifyProfile()}
+                      disabled={spotifyPreviewQuery.isLoading}
+                      className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                    >
+                      <Disc3 className="h-4 w-4" />
+                      {spotifyPreviewQuery.isLoading ? "Reading Spotify..." : "Use Spotify taste"}
+                    </button>
+                  )}
+
                   {connectionMode !== "live" ? (
                     <button
                       type="button"
@@ -245,6 +345,30 @@ export function AccountDock() {
                     </button>
                     ) : null}
                 </div>
+
+                {spotifyConnected && spotifyPreviewQuery.data ? (
+                  <div className="rounded-[1.15rem] border border-stroke/80 bg-white/80 px-3 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                        <Disc3 className="h-3.5 w-3.5" />
+                        Spotify connected
+                      </span>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                      Pulse found {spotifyPreviewQuery.data.themes.length} possible themes from your listening history.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {spotifyPreviewQuery.data.themes.slice(0, 3).map((theme) => (
+                        <span
+                          key={theme.id}
+                          className="rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
+                        >
+                          {theme.label} · {theme.confidenceLabel}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
 
                   <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke/80 pt-3">
                     <button

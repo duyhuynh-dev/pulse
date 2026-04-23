@@ -9,6 +9,7 @@ import type {
   LocationAnchorPayload,
   RecommendationsMapResponse,
   SupplySyncResponse,
+  TasteProfileResponse,
   UserConstraint
 } from "@/lib/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -152,6 +153,22 @@ export function startRedditConnection() {
 
 export function startMockRedditConnection() {
   return request<{ ok: true }>("/v1/reddit/mock-connect", {
+    method: "POST"
+  });
+}
+
+export function startSpotifyConnection() {
+  return request<{ authorizeUrl: string }>("/v1/spotify/connect/start", {
+    method: "POST"
+  });
+}
+
+export function getSpotifyTastePreview() {
+  return request<TasteProfileResponse>("/v1/taste/spotify/preview");
+}
+
+export function applySpotifyTaste() {
+  return request<TasteProfileResponse>("/v1/taste/spotify/apply", {
     method: "POST"
   });
 }
