@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, desc, select
@@ -5,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.events import CanonicalEvent, EventOccurrence, Venue
 from app.models.profile import UserInterestProfile
-from app.models.recommendation import DigestDelivery, RecommendationRun, VenueRecommendation
+from app.models.recommendation import DigestDelivery, FeedbackEvent, RecommendationRun, VenueRecommendation
 from app.models.user import User, UserAnchorLocation, UserConstraint
 from app.schemas.recommendations import (
     ArchiveResponse,
@@ -30,12 +31,23 @@ NYC_SERVICE_AREA = {
     "max_longitude": -73.65,
 }
 RECOMMENDATION_MAX_AGE = timedelta(minutes=30)
+FEEDBACK_LOOKBACK_WINDOW = timedelta(days=28)
 TOPIC_KEYWORD_MAP = {
     "underground_dance": ["techno", "warehouse", "club", "dance", "rave", "dj"],
     "indie_live_music": ["indie", "band", "concert", "live music", "show", "songwriter", "alt-pop"],
     "gallery_nights": ["gallery", "art", "opening", "installation", "visual"],
     "creative_meetups": ["meetup", "creative", "community", "networking"],
 }
+
+
+@dataclass
+class FeedbackSignals:
+    saved_venues: dict[str, float] = field(default_factory=dict)
+    dismissed_venues: dict[str, float] = field(default_factory=dict)
+    saved_topics: dict[str, float] = field(default_factory=dict)
+    dismissed_topics: dict[str, float] = field(default_factory=dict)
+    saved_neighborhoods: dict[str, float] = field(default_factory=dict)
+    dismissed_neighborhoods: dict[str, float] = field(default_factory=dict)
 
 
 async def _latest_run(session: AsyncSession, user_id: str) -> RecommendationRun | None:
@@ -62,6 +74,74 @@ async def _user_anchor(session: AsyncSession, user_id: str) -> UserAnchorLocatio
 
 async def _user_constraints(session: AsyncSession, user_id: str) -> UserConstraint | None:
     return await session.scalar(select(UserConstraint).where(UserConstraint.user_id == user_id).limit(1))
+
+
+async def _feedback_signals(session: AsyncSession, user_id: str) -> FeedbackSignals:
+    since = datetime.now(tz=UTC) - FEEDBACK_LOOKBACK_WINDOW
+    feedback_rows = list(
+        (
+            await session.scalars(
+                select(FeedbackEvent)
+                .where(FeedbackEvent.user_id == user_id, FeedbackEvent.created_at >= since)
+                .order_by(desc(FeedbackEvent.created_at))
+            )
+        ).all()
+    )
+    if not feedback_rows:
+        return FeedbackSignals()
+
+    occurrence_ids = {row.recommendation_id for row in feedback_rows}
+    occurrences = list(
+        (
+            await session.scalars(
+                select(EventOccurrence).where(EventOccurrence.id.in_(occurrence_ids))
+            )
+        ).all()
+    )
+    occurrences_by_id = {occurrence.id: occurrence for occurrence in occurrences}
+
+    venue_ids = {occurrence.venue_id for occurrence in occurrences}
+    event_ids = {occurrence.event_id for occurrence in occurrences}
+    venues = (
+        list((await session.scalars(select(Venue).where(Venue.id.in_(venue_ids)))).all())
+        if venue_ids
+        else []
+    )
+    events = (
+        list((await session.scalars(select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids)))).all())
+        if event_ids
+        else []
+    )
+    venues_by_id = {venue.id: venue for venue in venues}
+    events_by_id = {event.id: event for event in events}
+
+    signals = FeedbackSignals()
+
+    for row in feedback_rows:
+        occurrence = occurrences_by_id.get(row.recommendation_id)
+        if occurrence is None:
+            continue
+
+        weight = _feedback_recency_weight(row.created_at)
+        venue = venues_by_id.get(occurrence.venue_id)
+        event = events_by_id.get(occurrence.event_id)
+        metadata = occurrence.metadata_json or {}
+        topic_keys = metadata.get("topicKeys") or (
+            _derive_topic_keys(event, metadata.get("tags", [])) if event is not None else []
+        )
+
+        venue_store = signals.saved_venues if row.action == "save" else signals.dismissed_venues
+        topic_store = signals.saved_topics if row.action == "save" else signals.dismissed_topics
+        neighborhood_store = signals.saved_neighborhoods if row.action == "save" else signals.dismissed_neighborhoods
+
+        if venue is not None:
+            _add_feedback_weight(venue_store, venue.id, weight)
+            _add_feedback_weight(neighborhood_store, venue.neighborhood, weight)
+
+        for topic_key in topic_keys:
+            _add_feedback_weight(topic_store, topic_key, weight)
+
+    return signals
 
 
 def _timestamp_utc(value: datetime) -> datetime:
@@ -118,6 +198,30 @@ def _viewport_for_anchor(anchor: UserAnchorLocation | None) -> dict[str, float]:
 
 def _clamp_score(value: float) -> float:
     return max(0.05, min(0.99, round(value, 3)))
+
+
+def _feedback_recency_weight(created_at: datetime) -> float:
+    age = datetime.now(tz=UTC) - _timestamp_utc(created_at)
+    if age <= timedelta(days=7):
+        return 1.0
+    if age <= timedelta(days=14):
+        return 0.7
+    return 0.45
+
+
+def _add_feedback_weight(store: dict[str, float], key: str | None, weight: float) -> None:
+    normalized_key = _normalize_text(key)
+    if not normalized_key:
+        return
+    store[normalized_key] = store.get(normalized_key, 0.0) + weight
+
+
+def _average_feedback_weight(keys: list[str], store: dict[str, float]) -> float:
+    normalized_keys = [_normalize_text(key) for key in keys if _normalize_text(key)]
+    if not normalized_keys:
+        return 0.0
+    weights = [store.get(key, 0.0) for key in normalized_keys]
+    return sum(weights) / len(weights)
 
 
 def _topic_weight(topic: UserInterestProfile) -> float:
@@ -214,12 +318,90 @@ def _join_labels(labels: list[str]) -> str:
     return f"{', '.join(labels[:-1])}, and {labels[-1]}"
 
 
+def _feedback_topic_labels(
+    topic_keys: list[str],
+    profiles_by_key: dict[str, UserInterestProfile],
+) -> list[str]:
+    labels: list[str] = []
+    for key in topic_keys:
+        topic = profiles_by_key.get(key)
+        if topic is None or topic.label in labels:
+            continue
+        labels.append(topic.label)
+    return labels
+
+
+def _feedback_adjustment(
+    topic_keys: list[str],
+    profiles_by_key: dict[str, UserInterestProfile],
+    venue: Venue,
+    feedback_signals: FeedbackSignals,
+) -> tuple[float, dict | None]:
+    adjustment = 0.0
+
+    saved_venue_weight = feedback_signals.saved_venues.get(_normalize_text(venue.id), 0.0)
+    dismissed_venue_weight = feedback_signals.dismissed_venues.get(_normalize_text(venue.id), 0.0)
+    saved_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.saved_topics)
+    dismissed_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.dismissed_topics)
+    neighborhood_key = _normalize_text(venue.neighborhood)
+    neighborhood_delta = (
+        feedback_signals.saved_neighborhoods.get(neighborhood_key, 0.0)
+        - feedback_signals.dismissed_neighborhoods.get(neighborhood_key, 0.0)
+    )
+
+    if saved_venue_weight:
+        adjustment += min(0.18, 0.10 + (saved_venue_weight * 0.05))
+    if dismissed_venue_weight:
+        adjustment -= min(0.34, 0.18 + (dismissed_venue_weight * 0.08))
+
+    topic_delta = saved_topic_weight - dismissed_topic_weight
+    adjustment += max(-0.12, min(0.12, topic_delta * 0.10))
+    adjustment += max(-0.06, min(0.06, neighborhood_delta * 0.04))
+
+    feedback_reason: dict | None = None
+    topic_labels = _feedback_topic_labels(topic_keys, profiles_by_key)
+
+    if dismissed_venue_weight >= 0.45:
+        feedback_reason = {
+            "title": "Dismissed before",
+            "detail": f"You recently dismissed {venue.name}, so Pulse now holds it back.",
+        }
+    elif saved_venue_weight >= 0.45:
+        feedback_reason = {
+            "title": "Saved before",
+            "detail": f"You have saved {venue.name} before, so similar runs get a lift.",
+        }
+    elif topic_delta <= -0.35 and topic_labels:
+        feedback_reason = {
+            "title": "Dismiss pattern",
+            "detail": f"You often dismiss {_join_labels(topic_labels)} picks, so this is ranked more cautiously.",
+        }
+    elif topic_delta >= 0.35 and topic_labels:
+        feedback_reason = {
+            "title": "Save pattern",
+            "detail": f"You tend to save {_join_labels(topic_labels)} picks, so this gets a small lift.",
+        }
+    elif neighborhood_delta <= -0.6 and venue.neighborhood:
+        feedback_reason = {
+            "title": "Area pattern",
+            "detail": f"Pulse has seen more dismisses around {venue.neighborhood}, so this area is weighted down a bit.",
+        }
+    elif neighborhood_delta >= 0.6 and venue.neighborhood:
+        feedback_reason = {
+            "title": "Area pattern",
+            "detail": f"You have saved a few spots around {venue.neighborhood}, so this area gets a gentle boost.",
+        }
+
+    return max(-0.38, min(0.22, adjustment)), feedback_reason
+
+
 def _reason_items(
     matched_topics: list[UserInterestProfile],
     muted_topics: list[UserInterestProfile],
     travel: list[dict],
     budget_fit: float,
     venue: Venue,
+    feedback_reason: dict | None = None,
 ) -> list[dict]:
     reasons: list[dict] = []
     boosted_labels = [topic.label for topic in matched_topics if topic.boosted]
@@ -239,6 +421,9 @@ def _reason_items(
                 "detail": f"This venue lines up with your {_join_labels(matched_labels)} signals.",
             }
         )
+
+    if feedback_reason is not None:
+        reasons.append(feedback_reason)
 
     if muted_topics:
         reasons.append(
@@ -376,6 +561,7 @@ async def refresh_recommendations_for_user(
         await session.scalars(select(UserInterestProfile).where(UserInterestProfile.user_id == user.id))
     ).all()
     profiles_by_key = {row.topic_key: row for row in topic_rows}
+    feedback_signals = await _feedback_signals(session, user.id)
 
     occurrence_rows = (
         await session.scalars(
@@ -406,19 +592,27 @@ async def refresh_recommendations_for_user(
             _transit_minutes(travel),
             budget_fit,
         )
+        feedback_adjustment, feedback_reason = _feedback_adjustment(
+            topic_keys=topic_keys,
+            profiles_by_key=profiles_by_key,
+            venue=venue,
+            feedback_signals=feedback_signals,
+        )
+        adjusted_score = _clamp_score(score + feedback_adjustment)
         entry = {
             "venue": venue,
             "event": event,
             "occurrence": occurrence,
             "travel": travel,
-            "score": score,
-            "score_band": _score_band(score),
+            "score": adjusted_score,
+            "score_band": _score_band(adjusted_score),
             "reasons": _reason_items(
                 matched_topics=matched_topics,
                 muted_topics=muted_topics,
                 travel=travel,
                 budget_fit=budget_fit,
                 venue=venue,
+                feedback_reason=feedback_reason,
             ),
         }
         venue_entries.setdefault(venue.id, []).append(entry)

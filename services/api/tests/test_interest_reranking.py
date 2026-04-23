@@ -1,6 +1,13 @@
 from app.models.events import CanonicalEvent
 from app.models.profile import UserInterestProfile
-from app.services.recommendations import _candidate_score, _derive_topic_keys, _score_band
+from app.models.events import Venue
+from app.services.recommendations import (
+    FeedbackSignals,
+    _candidate_score,
+    _derive_topic_keys,
+    _feedback_adjustment,
+    _score_band,
+)
 
 
 def test_muted_topic_scores_lower_than_matching_active_topic() -> None:
@@ -77,3 +84,79 @@ def test_topic_keys_can_be_derived_from_event_text() -> None:
     topic_keys = _derive_topic_keys(event, ["brooklyn", "gallery opening"])
     assert "underground_dance" in topic_keys
     assert "gallery_nights" in topic_keys
+
+
+def test_feedback_adjustment_boosts_saved_venue_and_topics() -> None:
+    profiles_by_key = {
+        "indie_live_music": UserInterestProfile(
+            user_id="user-1",
+            topic_key="indie_live_music",
+            label="Indie live music",
+            confidence=0.88,
+            boosted=False,
+            muted=False,
+        )
+    }
+    venue = Venue(
+        name="Mercury Lounge",
+        neighborhood="Lower East Side",
+        address="217 E Houston St, New York, NY",
+        city="New York City",
+        state="NY",
+        latitude=40.7222,
+        longitude=-73.9864,
+    )
+    venue.id = "venue-1"
+    signals = FeedbackSignals(
+        saved_venues={"venue-1": 1.0},
+        saved_topics={"indie_live_music": 0.8},
+    )
+
+    adjustment, feedback_reason = _feedback_adjustment(
+        ["indie_live_music"],
+        profiles_by_key,
+        venue,
+        signals,
+    )
+
+    assert adjustment > 0
+    assert feedback_reason is not None
+    assert feedback_reason["title"] == "Saved before"
+
+
+def test_feedback_adjustment_penalizes_dismissed_patterns() -> None:
+    profiles_by_key = {
+        "underground_dance": UserInterestProfile(
+            user_id="user-1",
+            topic_key="underground_dance",
+            label="Underground dance",
+            confidence=0.94,
+            boosted=False,
+            muted=False,
+        )
+    }
+    venue = Venue(
+        name="Elsewhere",
+        neighborhood="Bushwick",
+        address="599 Johnson Ave, Brooklyn, NY",
+        city="New York City",
+        state="NY",
+        latitude=40.7063,
+        longitude=-73.9232,
+    )
+    venue.id = "venue-2"
+    signals = FeedbackSignals(
+        dismissed_topics={"underground_dance": 1.1},
+        dismissed_neighborhoods={"bushwick": 0.9},
+    )
+
+    adjustment, feedback_reason = _feedback_adjustment(
+        ["underground_dance"],
+        profiles_by_key,
+        venue,
+        signals,
+    )
+
+    assert adjustment < 0
+    assert feedback_reason is not None
+    assert feedback_reason["title"] == "Dismiss pattern"

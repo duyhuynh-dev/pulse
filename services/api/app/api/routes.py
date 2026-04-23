@@ -319,7 +319,8 @@ async def recommendation_feedback(
             reasons_json=[reason.model_dump() for reason in payload.reasons],
         )
     )
-    await session.commit()
+    await session.flush()
+    await refresh_recommendations_for_user(session, user, force=True)
     return OkResponse()
 
 
