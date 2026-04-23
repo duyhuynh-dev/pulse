@@ -145,7 +145,7 @@ export function PulseShell() {
 
   return (
     <main className="min-h-screen px-4 py-4 md:px-6 md:py-6">
-      <div className="mx-auto flex max-w-[1680px] flex-col gap-4 xl:h-[calc(100vh-3rem)]">
+      <div className="mx-auto flex max-w-[1680px] flex-col gap-4 2xl:h-[calc(100vh-3rem)]">
         <header className="relative z-[60] overflow-visible rounded-[1.5rem] border border-stroke/80 bg-card/80 px-5 py-3.5 shadow-float backdrop-blur">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
@@ -182,9 +182,9 @@ export function PulseShell() {
           </div>
         </header>
 
-        <section className="relative z-0 grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.58fr)_minmax(23rem,0.82fr)]">
+        <section className="relative z-0 grid min-h-0 flex-1 gap-4 2xl:grid-cols-[minmax(0,1.58fr)_minmax(23rem,0.82fr)]">
           <div className="flex min-h-[58vh] min-w-0 flex-col overflow-hidden rounded-[2rem] border border-stroke/80 bg-card/80 shadow-float">
-            <div className="flex items-center justify-between gap-6 border-b border-stroke/70 bg-white/84 px-5 py-4 backdrop-blur">
+            <div className="flex flex-col gap-4 border-b border-stroke/70 bg-white/84 px-5 py-4 backdrop-blur lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0 max-w-2xl">
                 <p className="text-sm font-medium uppercase tracking-[0.22em] text-slate-500">This week on the map</p>
                 <h1 className="mt-2 text-2xl font-semibold leading-tight text-slate-900">
@@ -192,7 +192,7 @@ export function PulseShell() {
                 </h1>
               </div>
 
-              <div className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap">
+              <div className="flex w-full flex-wrap items-center gap-2 lg:ml-auto lg:w-auto lg:shrink-0 lg:justify-end lg:whitespace-nowrap">
                 <button
                   type="button"
                   onClick={() => digestPreviewMutation.mutate()}
@@ -221,7 +221,7 @@ export function PulseShell() {
               </div>
             </div>
 
-            <div className="map-surface flex-1 min-h-[540px] bg-card/80 xl:min-h-0">
+            <div className="map-surface flex-1 min-h-[520px] bg-card/80 md:min-h-[580px] 2xl:min-h-0">
               <PulseMap
                 pins={mapQuery.data?.pins ?? []}
                 viewport={mapQuery.data?.viewport ?? null}
@@ -231,7 +231,7 @@ export function PulseShell() {
             </div>
           </div>
 
-          <div className="grid min-h-0 gap-4 xl:grid-rows-[auto,minmax(0,1fr)]">
+          <div className="grid min-h-0 gap-4 2xl:grid-rows-[auto,minmax(0,1fr)]">
             <InterestProfilePanel
               topics={interestsQuery.data?.topics ?? []}
               isLoading={interestsQuery.isLoading}
