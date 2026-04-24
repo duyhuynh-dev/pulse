@@ -88,12 +88,6 @@ export interface ThemeEvidenceCount {
   count: number;
 }
 
-export interface ThemeCatalogItem {
-  id: string;
-  label: string;
-  description: string;
-}
-
 export interface ThemeEvidenceSnippet {
   type: string;
   subreddit?: string | null;
