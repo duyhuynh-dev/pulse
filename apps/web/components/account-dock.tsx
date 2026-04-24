@@ -54,7 +54,7 @@ function statusCopy(connectionMode: "none" | "live" | "sample", isSignedIn: bool
 }
 
 export function AccountDock() {
-  const { isConfigured, isLoading, isAuthenticated, user, signOut, authMethod } = useAuth();
+  const { isConfigured, isLoading, isAuthenticated, user, signOut, authMethod, refresh } = useAuth();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -139,10 +139,11 @@ export function AccountDock() {
 
     setOpen(true);
     setMessage("Spotify connected. Review the inferred taste themes and apply them when they look right.");
+    void refresh();
     void queryClient.invalidateQueries({ queryKey: ["auth-viewer"] });
     void queryClient.invalidateQueries({ queryKey: ["spotify-taste-preview"] });
     window.history.replaceState({}, "", window.location.pathname);
-  }, [queryClient]);
+  }, [queryClient, refresh]);
 
   useEffect(() => {
     if (!spotifyPreviewQuery.error) {

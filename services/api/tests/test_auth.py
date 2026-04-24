@@ -1,12 +1,15 @@
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import Response
 
+from app.core.config import Settings
 from app.services.auth import (
     build_oauth_state,
     build_pulse_session_token,
     extract_bearer_token,
     parse_oauth_state,
     parse_pulse_session_token,
+    set_pulse_session_cookie,
 )
 
 TEST_SECRET = "pulse-test-secret-32-chars-minimum!"
@@ -49,3 +52,29 @@ def test_oauth_state_rejects_wrong_purpose() -> None:
 def test_pulse_session_round_trip_returns_user_id() -> None:
     token = build_pulse_session_token("user-id-123", TEST_SECRET)
     assert parse_pulse_session_token(token, TEST_SECRET) == "user-id-123"
+
+
+def test_pulse_session_cookie_uses_none_for_cross_origin_https() -> None:
+    response = Response()
+    settings = Settings(
+        web_app_url="https://pulse-app.duckdns.org",
+        api_base_url="https://pulse-api.duckdns.org",
+        oauth_state_secret=TEST_SECRET,
+    )
+
+    set_pulse_session_cookie(response, "user-id-123", settings)
+
+    assert "SameSite=none" in response.headers["set-cookie"]
+
+
+def test_pulse_session_cookie_stays_lax_for_localhost() -> None:
+    response = Response()
+    settings = Settings(
+        web_app_url="http://localhost:3000",
+        api_base_url="http://localhost:8000",
+        oauth_state_secret=TEST_SECRET,
+    )
+
+    set_pulse_session_cookie(response, "user-id-123", settings)
+
+    assert "SameSite=lax" in response.headers["set-cookie"]

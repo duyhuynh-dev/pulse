@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -150,7 +151,7 @@ def set_pulse_session_cookie(response: Response, user_id: str, settings=None) ->
         value=token,
         max_age=settings.pulse_session_ttl_seconds,
         httponly=True,
-        samesite="lax",
+        samesite=_pulse_session_cookie_samesite(settings),
         secure=settings.web_app_url.startswith("https://"),
         path="/",
     )
@@ -161,10 +162,25 @@ def clear_pulse_session_cookie(response: Response, settings=None) -> None:
     response.delete_cookie(
         key=settings.pulse_session_cookie_name,
         httponly=True,
-        samesite="lax",
+        samesite=_pulse_session_cookie_samesite(settings),
         secure=settings.web_app_url.startswith("https://"),
         path="/",
     )
+
+
+def _pulse_session_cookie_samesite(settings=None) -> Literal["lax", "none"]:
+    settings = settings or get_settings()
+    if not settings.web_app_url.startswith("https://"):
+        return "lax"
+
+    web_origin = _origin_tuple(settings.web_app_url)
+    api_origin = _origin_tuple(settings.api_base_url)
+    return "none" if web_origin != api_origin else "lax"
+
+
+def _origin_tuple(url: str) -> tuple[str, str, int | None]:
+    parsed = urlsplit(url)
+    return parsed.scheme, parsed.hostname or "", parsed.port
 
 
 async def resolve_user(
