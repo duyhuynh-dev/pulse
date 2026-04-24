@@ -10,17 +10,21 @@ import {
   Link2,
   LogOut,
   Mail,
+  Upload,
   ShieldCheck,
   X,
 } from "lucide-react";
 import {
+  applyRedditExportTaste,
   applySpotifyTaste,
   getAuthViewer,
   getSpotifyTastePreview,
+  previewRedditExportTaste,
   startMockRedditConnection,
   startRedditConnection,
   startSpotifyConnection,
 } from "@/lib/api";
+import type { TasteProfileResponse } from "@/lib/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/components/auth-provider";
 
@@ -61,8 +65,13 @@ export function AccountDock() {
   const [isConnectingReddit, setIsConnectingReddit] = useState(false);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [isConnectingSpotify, setIsConnectingSpotify] = useState(false);
+  const [isReadingRedditExport, setIsReadingRedditExport] = useState(false);
+  const [isApplyingRedditExport, setIsApplyingRedditExport] = useState(false);
+  const [redditExportFile, setRedditExportFile] = useState<File | null>(null);
+  const [redditExportPreview, setRedditExportPreview] = useState<TasteProfileResponse | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const redditExportInputRef = useRef<HTMLInputElement | null>(null);
   const supabase = getSupabaseBrowserClient();
 
   const viewerQuery = useQuery({
@@ -231,6 +240,65 @@ export function AccountDock() {
     }
   };
 
+  const chooseRedditExport = () => {
+    redditExportInputRef.current?.click();
+  };
+
+  const previewRedditExport = async (file: File) => {
+    setIsReadingRedditExport(true);
+    setRedditExportFile(file);
+    try {
+      const preview = await previewRedditExportTaste(file);
+      setRedditExportPreview(preview);
+      if (preview.themes.length) {
+        setMessage(`Reddit export read successfully. Pulse found ${preview.themes.length} possible themes.`);
+      } else {
+        const reason =
+          typeof preview.unmatchedActivity?.reason === "string"
+            ? preview.unmatchedActivity.reason
+            : "Reddit export did not surface enough nightlife signal yet.";
+        setMessage(reason);
+      }
+    } catch (error) {
+      setRedditExportPreview(null);
+      setMessage(error instanceof Error ? error.message : "Unable to read the Reddit export right now.");
+    } finally {
+      setIsReadingRedditExport(false);
+    }
+  };
+
+  const onRedditExportPicked = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    await previewRedditExport(file);
+    event.target.value = "";
+  };
+
+  const applyRedditExport = async () => {
+    if (!redditExportFile) {
+      setMessage("Choose a Reddit export file first.");
+      return;
+    }
+
+    setIsApplyingRedditExport(true);
+    try {
+      await applyRedditExportTaste(redditExportFile);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["auth-viewer"] }),
+        queryClient.invalidateQueries({ queryKey: ["interests"] }),
+        queryClient.invalidateQueries({ queryKey: ["map-recommendations"] }),
+        queryClient.invalidateQueries({ queryKey: ["archive"] }),
+      ]);
+      setMessage("Reddit export applied. Pulse just refreshed the map and interest signals.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to apply the Reddit export right now.");
+    } finally {
+      setIsApplyingRedditExport(false);
+    }
+  };
+
   return (
     <div className="relative z-[70] overflow-visible">
       <button
@@ -296,6 +364,13 @@ export function AccountDock() {
 
           {isSignedIn ? (
             <div className="mt-4 space-y-3">
+              <input
+                ref={redditExportInputRef}
+                type="file"
+                accept=".zip,.json,application/zip,application/json"
+                className="hidden"
+                onChange={(event) => void onRedditExportPicked(event)}
+              />
               <div className="grid gap-2 sm:grid-cols-2">
                 {!spotifyConnected ? (
                   <button
@@ -355,6 +430,68 @@ export function AccountDock() {
                     <Link2 className="h-4 w-4" />
                     {isLoadingSample ? "Loading sample..." : "Use sample profile"}
                   </button>
+                ) : null}
+              </div>
+
+              <div className="rounded-[1.15rem] border border-stroke/80 bg-white/80 px-3 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-stroke bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      <Upload className="h-3.5 w-3.5 text-accent" />
+                      Reddit export
+                    </span>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                      Upload your Reddit data export if you want broader cultural signal than Spotify alone can provide.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={chooseRedditExport}
+                    disabled={isReadingRedditExport}
+                    className="inline-flex items-center justify-center rounded-full border border-stroke bg-white px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-60"
+                  >
+                    {isReadingRedditExport ? "Reading..." : "Choose file"}
+                  </button>
+                </div>
+
+                {redditExportFile ? (
+                  <p className="mt-3 text-xs leading-5 text-slate-500">Selected: {redditExportFile.name}</p>
+                ) : null}
+
+                {redditExportPreview ? (
+                  <>
+                    {redditExportPreview.themes.length ? (
+                      <>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">
+                          Pulse found {redditExportPreview.themes.length} possible themes from your Reddit export.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {redditExportPreview.themes.slice(0, 4).map((theme) => (
+                            <span
+                              key={theme.id}
+                              className="rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
+                            >
+                              {theme.label} · {theme.confidenceLabel}
+                            </span>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void applyRedditExport()}
+                          disabled={isApplyingRedditExport}
+                          className="mt-4 inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                        >
+                          {isApplyingRedditExport ? "Applying Reddit taste..." : "Use Reddit taste"}
+                        </button>
+                      </>
+                    ) : (
+                      <p className="mt-3 text-sm leading-6 text-slate-600">
+                        {typeof redditExportPreview.unmatchedActivity?.reason === "string"
+                          ? redditExportPreview.unmatchedActivity.reason
+                          : "Pulse could not find enough nightlife-relevant signal in this export yet."}
+                      </p>
+                    )}
+                  </>
                 ) : null}
               </div>
 
