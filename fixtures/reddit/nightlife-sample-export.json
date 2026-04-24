@@ -1,0 +1,52 @@
+{
+  "username": "pulse_demo_user",
+  "comments": [
+    {
+      "author": "pulse_demo_user",
+      "subreddit": "aves",
+      "body": "Need a warehouse techno night in Bushwick with a real sound system and good afters options.",
+      "score": 18,
+      "created_utc": 1713877200,
+      "link_title": "Best warehouse rave venues in NYC?",
+      "permalink": "/r/aves/comments/abc123/comment/c1/"
+    },
+    {
+      "author": "pulse_demo_user",
+      "subreddit": "FoodNYC",
+      "body": "Where should we go for late-night food after the club? Looking for a place open well past midnight.",
+      "score": 11,
+      "created_utc": 1713880800,
+      "link_title": "Late-night bites after a show",
+      "permalink": "/r/FoodNYC/comments/def456/comment/c2/"
+    },
+    {
+      "author": "pulse_demo_user",
+      "subreddit": "rupaulsdragrace",
+      "body": "Would love a queer nightlife spot with drag and a strong community vibe this weekend.",
+      "score": 9,
+      "created_utc": 1713882000,
+      "link_title": "Queer nightlife recs in Brooklyn?",
+      "permalink": "/r/rupaulsdragrace/comments/ghi789/comment/c3/"
+    }
+  ],
+  "posts": [
+    {
+      "author": "pulse_demo_user",
+      "subreddit": "indieheads",
+      "title": "Looking for a small room for an indie live show this Friday",
+      "selftext": "Would love a singer-songwriter or alt-pop bill in Manhattan or Brooklyn.",
+      "score": 14,
+      "created_utc": 1713884400,
+      "permalink": "/r/indieheads/comments/post1/looking_for_a_small_room/"
+    },
+    {
+      "author": "pulse_demo_user",
+      "subreddit": "art",
+      "title": "Any gallery opening or installation worth planning around this weekend?",
+      "selftext": "Especially interested in a Lower East Side gallery crawl.",
+      "score": 8,
+      "created_utc": 1713888000,
+      "permalink": "/r/art/comments/post2/gallery_opening_weekend/"
+    }
+  ]
+}

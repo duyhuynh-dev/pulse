@@ -1,0 +1,34 @@
+{
+  "username": "pulse_low_signal_user",
+  "comments": [
+    {
+      "author": "pulse_low_signal_user",
+      "subreddit": "Python",
+      "body": "I still prefer dependency injection here because it keeps the test surface smaller.",
+      "score": 5,
+      "created_utc": 1713877200,
+      "link_title": "FastAPI architecture question",
+      "permalink": "/r/Python/comments/abc123/comment/c1/"
+    },
+    {
+      "author": "pulse_low_signal_user",
+      "subreddit": "selfhosted",
+      "body": "Trying to decide between Docker Compose and Nomad for a tiny homelab setup.",
+      "score": 4,
+      "created_utc": 1713880800,
+      "link_title": "Container stack recommendations",
+      "permalink": "/r/selfhosted/comments/def456/comment/c2/"
+    }
+  ],
+  "posts": [
+    {
+      "author": "pulse_low_signal_user",
+      "subreddit": "programming",
+      "title": "What are people using for local-first database experiments now?",
+      "selftext": "Mostly curious about sync and offline conflict handling.",
+      "score": 6,
+      "created_utc": 1713884400,
+      "permalink": "/r/programming/comments/post1/local_first_database_experiments/"
+    }
+  ]
+}
