@@ -40,21 +40,23 @@ function statusCopy(connectionMode: "none" | "live" | "sample", isSignedIn: bool
   if (isSignedIn) {
     return {
       eyebrow: "Identity only",
-      detail: "Connect Reddit whenever you want live signals.",
+      detail: "Add providers whenever you want Pulse to sharpen the map around your tastes.",
     };
   }
   return {
     eyebrow: "Demo mode",
-    detail: "Sign in here and keep the setup out of the main canvas.",
+    detail: "Start with Spotify for the fastest path in, or use a magic link if you prefer email.",
   };
 }
 
 export function AccountDock() {
-  const { isConfigured, isLoading, session, user, signOut } = useAuth();
+  const { isConfigured, isLoading, isAuthenticated, user, signOut, authMethod } = useAuth();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
-  const [message, setMessage] = useState("Send a magic link to unlock personalized digests, saved account state, and provider connections.");
+  const [message, setMessage] = useState(
+    "Continue with Spotify to jump into Pulse fast, or use a magic link if you prefer email.",
+  );
   const [showSwitchForm, setShowSwitchForm] = useState(false);
   const [isConnectingReddit, setIsConnectingReddit] = useState(false);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
@@ -68,7 +70,7 @@ export function AccountDock() {
     queryFn: getAuthViewer,
   });
 
-  const isSignedIn = Boolean(session && !isLoading);
+  const isSignedIn = Boolean(isAuthenticated && !isLoading);
   const connectionMode = viewerQuery.data?.redditConnectionMode ?? "none";
   const status = statusCopy(connectionMode, isSignedIn);
   const spotifyConnected = Boolean(viewerQuery.data?.spotifyConnected);
@@ -143,7 +145,7 @@ export function AccountDock() {
     event.preventDefault();
 
     if (!supabase) {
-      setMessage("Supabase browser keys are missing. Configure them to enable account sign-in.");
+      setMessage("Supabase browser keys are missing. Configure them to enable magic-link sign-in.");
       return;
     }
 
@@ -158,7 +160,7 @@ export function AccountDock() {
   };
 
   const connectReddit = async () => {
-    if (!session) {
+    if (!isAuthenticated) {
       setMessage("Sign in first so Pulse can attach the Reddit connection to your account.");
       return;
     }
@@ -174,7 +176,7 @@ export function AccountDock() {
   };
 
   const connectSampleProfile = async () => {
-    if (!session) {
+    if (!isAuthenticated) {
       setMessage("Sign in first so Pulse can attach the sample profile to your account.");
       return;
     }
@@ -197,11 +199,6 @@ export function AccountDock() {
   };
 
   const connectSpotify = async () => {
-    if (!session) {
-      setMessage("Sign in first so Pulse can attach the Spotify connection to your account.");
-      return;
-    }
-
     setIsConnectingSpotify(true);
     try {
       const response = await startSpotifyConnection();
@@ -250,12 +247,13 @@ export function AccountDock() {
           <div className="relative flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Account</p>
-              <h3 className="mt-1 text-xl font-semibold text-slate-900">{isSignedIn ? "Profile" : "Sign in quietly"}</h3>
+              <h3 className="mt-1 text-xl font-semibold text-slate-900">{isSignedIn ? "Profile" : "Start quietly"}</h3>
             </div>
             <button
               type="button"
               onClick={() => setOpen(false)}
               className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stroke bg-white text-slate-500 transition hover:text-slate-900"
+              aria-label="Close"
             >
               <X className="h-4 w-4" />
             </button>
@@ -285,136 +283,152 @@ export function AccountDock() {
               </>
             ) : (
               <p className="text-sm leading-6 text-slate-600">
-                Supabase browser keys are missing, so the app stays in demo mode until those env vars are added.
+                Pulse auth is not configured in this environment yet.
               </p>
             )}
           </div>
 
-          {isConfigured ? (
-            <>
-              {isSignedIn ? (
-                <div className="mt-4 space-y-3">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {!spotifyConnected ? (
-                    <button
-                      type="button"
-                      onClick={() => void connectSpotify()}
-                      disabled={isConnectingSpotify}
-                      className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-                    >
-                      <Disc3 className="h-4 w-4" />
-                      {isConnectingSpotify ? "Redirecting..." : "Connect Spotify"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => void applySpotifyProfile()}
-                      disabled={spotifyPreviewQuery.isLoading}
-                      className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-                    >
-                      <Disc3 className="h-4 w-4" />
-                      {spotifyPreviewQuery.isLoading ? "Reading Spotify..." : "Use Spotify taste"}
-                    </button>
-                  )}
-
-                  {connectionMode !== "live" ? (
-                    <button
-                      type="button"
-                      onClick={() => void connectReddit()}
-                      disabled={isConnectingReddit}
-                      className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-                    >
-                      <Link2 className="h-4 w-4" />
-                      {isConnectingReddit ? "Redirecting..." : connectionMode === "sample" ? "Connect live Reddit" : "Connect Reddit"}
-                    </button>
-                  ) : (
-                    <div className="inline-flex items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700">
-                      Live Reddit connected
-                    </div>
-                  )}
-
-                  {connectionMode === "none" ? (
-                    <button
-                      type="button"
-                      onClick={() => void connectSampleProfile()}
-                      disabled={isLoadingSample}
-                      className="inline-flex items-center justify-center gap-2 rounded-full border border-stroke bg-white px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
-                    >
-                      <Link2 className="h-4 w-4" />
-                      {isLoadingSample ? "Loading sample..." : "Use sample profile"}
-                    </button>
-                    ) : null}
-                </div>
-
-                {spotifyConnected && spotifyPreviewQuery.data ? (
-                  <div className="rounded-[1.15rem] border border-stroke/80 bg-white/80 px-3 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
-                        <Disc3 className="h-3.5 w-3.5" />
-                        Spotify connected
-                      </span>
-                    </div>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
-                      Pulse found {spotifyPreviewQuery.data.themes.length} possible themes from your listening history.
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {spotifyPreviewQuery.data.themes.slice(0, 3).map((theme) => (
-                        <span
-                          key={theme.id}
-                          className="rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
-                        >
-                          {theme.label} · {theme.confidenceLabel}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke/80 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowSwitchForm((value) => !value)}
-                      className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
-                    >
-                      {showSwitchForm ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                      Use another email
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void signOut()}
-                      className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-900"
-                    >
-                      <LogOut className="h-4 w-4" />
-                      Sign out
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              {!isSignedIn || showSwitchForm ? (
-                <form
-                  onSubmit={sendMagicLink}
-                  className="mt-4 grid gap-2 rounded-[1.25rem] border border-dashed border-stroke bg-white/70 p-3"
-                >
-                  {isSignedIn ? (
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Switch account</p>
-                  ) : (
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Magic-link sign in</p>
-                  )}
-                  <input
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    type="email"
-                    required
-                    placeholder="you@example.com"
-                    className="rounded-2xl border border-stroke bg-white px-3 py-2 text-sm"
-                  />
-                  <button type="submit" className="rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white">
-                    {isSignedIn ? "Send magic link to another email" : "Send magic link"}
+          {isSignedIn ? (
+            <div className="mt-4 space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {!spotifyConnected ? (
+                  <button
+                    type="button"
+                    onClick={() => void connectSpotify()}
+                    disabled={isConnectingSpotify}
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    <Disc3 className="h-4 w-4" />
+                    {isConnectingSpotify ? "Redirecting..." : authMethod === "pulse_session" ? "Reconnect Spotify" : "Connect Spotify"}
                   </button>
-                </form>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void applySpotifyProfile()}
+                    disabled={spotifyPreviewQuery.isLoading}
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    <Disc3 className="h-4 w-4" />
+                    {spotifyPreviewQuery.isLoading ? "Reading Spotify..." : "Use Spotify taste"}
+                  </button>
+                )}
+
+                {connectionMode !== "live" ? (
+                  <button
+                    type="button"
+                    onClick={() => void connectReddit()}
+                    disabled={isConnectingReddit}
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    <Link2 className="h-4 w-4" />
+                    {isConnectingReddit ? "Redirecting..." : connectionMode === "sample" ? "Connect live Reddit" : "Connect Reddit"}
+                  </button>
+                ) : (
+                  <div className="inline-flex items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700">
+                    Live Reddit connected
+                  </div>
+                )}
+
+                {connectionMode === "none" ? (
+                  <button
+                    type="button"
+                    onClick={() => void connectSampleProfile()}
+                    disabled={isLoadingSample}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-stroke bg-white px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
+                  >
+                    <Link2 className="h-4 w-4" />
+                    {isLoadingSample ? "Loading sample..." : "Use sample profile"}
+                  </button>
+                ) : null}
+              </div>
+
+              {spotifyConnected && spotifyPreviewQuery.data ? (
+                <div className="rounded-[1.15rem] border border-stroke/80 bg-white/80 px-3 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                      <Disc3 className="h-3.5 w-3.5" />
+                      Spotify connected
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">
+                    Pulse found {spotifyPreviewQuery.data.themes.length} possible themes from your listening history.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {spotifyPreviewQuery.data.themes.slice(0, 3).map((theme) => (
+                      <span
+                        key={theme.id}
+                        className="rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
+                      >
+                        {theme.label} · {theme.confidenceLabel}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               ) : null}
-            </>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke/80 pt-3">
+                {authMethod === "supabase" ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowSwitchForm((value) => !value)}
+                    className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
+                  >
+                    {showSwitchForm ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    Use another email
+                  </button>
+                ) : (
+                  <span className="text-xs leading-5 text-slate-500">
+                    Spotify started this Pulse session. You can still add magic-link sign-in anytime.
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void signOut()}
+                  className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-900"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign out
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {!isSignedIn || showSwitchForm ? (
+            <form
+              onSubmit={sendMagicLink}
+              className="mt-4 grid gap-2 rounded-[1.25rem] border border-dashed border-stroke bg-white/70 p-3"
+            >
+              {isSignedIn ? (
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Add magic-link sign-in</p>
+              ) : (
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Magic-link sign in</p>
+              )}
+              <input
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                type="email"
+                required
+                placeholder="you@example.com"
+                className="rounded-2xl border border-stroke bg-white px-3 py-2 text-sm"
+              />
+              <button type="submit" className="rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white">
+                {isSignedIn ? "Send magic link to this email" : "Send magic link"}
+              </button>
+            </form>
+          ) : null}
+
+          {!isSignedIn ? (
+            <div className="mt-4 grid gap-2">
+              <button
+                type="button"
+                onClick={() => void connectSpotify()}
+                disabled={isConnectingSpotify}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+              >
+                <Disc3 className="h-4 w-4" />
+                {isConnectingSpotify ? "Redirecting to Spotify..." : "Continue with Spotify"}
+              </button>
+            </div>
           ) : null}
 
           <p className="mt-4 text-xs leading-5 text-slate-500">{message}</p>

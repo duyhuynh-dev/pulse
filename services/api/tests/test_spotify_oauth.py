@@ -11,7 +11,7 @@ def test_build_spotify_authorize_url_includes_expected_query() -> None:
         spotify_client_id="spotify-client-id",
         spotify_client_secret="spotify-secret",
         spotify_redirect_uri="http://localhost:8000/v1/spotify/connect/callback",
-        spotify_scopes="user-top-read user-read-recently-played",
+        spotify_scopes="user-read-email user-top-read user-read-recently-played",
     )
 
     authorize_url = build_spotify_authorize_url("state-token", settings=settings)
@@ -22,7 +22,7 @@ def test_build_spotify_authorize_url_includes_expected_query() -> None:
     assert parsed.path == "/authorize"
     assert query["client_id"] == ["spotify-client-id"]
     assert query["state"] == ["state-token"]
-    assert query["scope"] == ["user-top-read user-read-recently-played"]
+    assert query["scope"] == ["user-read-email user-top-read user-read-recently-played"]
     assert query["redirect_uri"] == ["http://localhost:8000/v1/spotify/connect/callback"]
 
 

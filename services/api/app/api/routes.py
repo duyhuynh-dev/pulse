@@ -2,8 +2,8 @@ from datetime import datetime
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,11 +33,13 @@ from app.schemas.taste import (
 )
 from app.services.apple_maps import build_mapkit_token
 from app.services.auth import (
-    get_or_create_user,
     build_oauth_state,
+    clear_pulse_session_cookie,
+    get_or_create_user,
     parse_oauth_state,
     require_authenticated_user,
     resolve_user,
+    set_pulse_session_cookie,
 )
 from app.services.digest import build_digest_preview, send_digest_preview, send_due_weekly_digests
 from app.services.ingestion import upsert_ingested_candidates
@@ -58,18 +60,24 @@ router = APIRouter(prefix="/v1")
 
 async def current_identity(
     session: AsyncSession = Depends(get_db),
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     x_pulse_user_email: Annotated[str | None, Header()] = None,
 ):
-    return await resolve_user(session, authorization, x_pulse_user_email)
+    settings = get_settings()
+    pulse_session_token = request.cookies.get(settings.pulse_session_cookie_name)
+    return await resolve_user(session, authorization, x_pulse_user_email, pulse_session_token)
 
 
 async def authenticated_identity(
     session: AsyncSession = Depends(get_db),
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     x_pulse_user_email: Annotated[str | None, Header()] = None,
 ):
-    return await require_authenticated_user(session, authorization, x_pulse_user_email)
+    settings = get_settings()
+    pulse_session_token = request.cookies.get(settings.pulse_session_cookie_name)
+    return await require_authenticated_user(session, authorization, x_pulse_user_email, pulse_session_token)
 
 
 async def current_user(identity=Depends(current_identity)):
@@ -109,14 +117,23 @@ async def auth_me(
     )
     connection_mode = "live" if live_connection else "sample" if sample_connection else "none"
     return AuthViewerResponse(
+        userId=identity.user.id,
         email=identity.user.email,
         displayName=identity.user.display_name,
         isAuthenticated=identity.is_authenticated,
         isDemo=identity.is_demo,
+        authMethod=identity.auth_method,
         redditConnected=connection_mode != "none",
         redditConnectionMode=connection_mode,
         spotifyConnected=spotify_connection is not None,
     )
+
+
+@router.post("/auth/sign-out", response_model=OkResponse)
+async def auth_sign_out() -> JSONResponse:
+    response = JSONResponse(OkResponse().model_dump())
+    clear_pulse_session_cookie(response)
+    return response
 
 
 @router.post("/reddit/connect/start", response_model=RedditConnectStartResponse)
@@ -213,7 +230,7 @@ async def reddit_connect_callback(
 
 @router.post("/spotify/connect/start", response_model=SpotifyConnectStartResponse)
 async def spotify_connect_start(
-    identity=Depends(authenticated_identity),
+    identity=Depends(current_identity),
 ) -> SpotifyConnectStartResponse:
     settings = get_settings()
     if not settings.oauth_state_secret:
@@ -222,7 +239,11 @@ async def spotify_connect_start(
             detail="OAuth state secret is not configured.",
         )
 
-    state = build_oauth_state(identity.user.email, settings.oauth_state_secret, purpose="spotify-connect")
+    state = build_oauth_state(
+        identity.user.email if identity.is_authenticated else None,
+        settings.oauth_state_secret,
+        purpose="spotify-connect",
+    )
     try:
         authorize_url = build_spotify_authorize_url(state)
     except ValueError as error:
@@ -250,8 +271,12 @@ async def spotify_connect_callback(
             detail="OAuth state secret is not configured.",
         )
 
-    email = parse_oauth_state(state, settings.oauth_state_secret, purpose="spotify-connect")
-    user = await get_or_create_user(session, email=email)
+    state_email = parse_oauth_state(
+        state,
+        settings.oauth_state_secret,
+        purpose="spotify-connect",
+        required_sub=False,
+    )
 
     try:
         token_payload = await exchange_spotify_code(code)
@@ -263,6 +288,19 @@ async def spotify_connect_callback(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Spotify OAuth exchange failed.",
         ) from error
+
+    resolved_email = state_email or me_payload.get("email")
+    if not resolved_email:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Spotify did not return an email address for Pulse sign-in.",
+        )
+
+    user = await get_or_create_user(
+        session,
+        email=resolved_email,
+        display_name=me_payload.get("display_name") or resolved_email,
+    )
 
     connection = await session.scalar(
         select(OAuthConnection).where(
@@ -279,7 +317,9 @@ async def spotify_connect_callback(
     connection.refresh_token_encrypted = token_payload.get("refresh_token") or connection.refresh_token_encrypted
     connection.scope_csv = token_payload.get("scope")
     await session.commit()
-    return RedirectResponse(f"{settings.web_app_url}/?spotify=connected", status_code=status.HTTP_302_FOUND)
+    response = RedirectResponse(f"{settings.web_app_url}/?spotify=connected", status_code=status.HTTP_302_FOUND)
+    set_pulse_session_cookie(response, user.id)
+    return response
 
 
 @router.post("/reddit/mock-connect", response_model=OkResponse)

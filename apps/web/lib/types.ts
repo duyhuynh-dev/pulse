@@ -72,10 +72,12 @@ export interface FeedbackReason {
 }
 
 export interface AuthViewer {
+  userId: string;
   email: string;
   displayName?: string | null;
   isAuthenticated: boolean;
   isDemo: boolean;
+  authMethod: "demo" | "supabase" | "pulse_session" | "email_header";
   redditConnected: boolean;
   redditConnectionMode: "none" | "live" | "sample";
   spotifyConnected: boolean;

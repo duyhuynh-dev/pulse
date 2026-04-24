@@ -35,7 +35,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     headers,
-    cache: "no-store"
+    cache: "no-store",
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -143,6 +144,12 @@ export function saveConstraints(payload: UserConstraint) {
 
 export function getAuthViewer() {
   return request<AuthViewer>("/v1/auth/me");
+}
+
+export function signOutPulseSession() {
+  return request<{ ok: true }>("/v1/auth/sign-out", {
+    method: "POST"
+  });
 }
 
 export function startRedditConnection() {

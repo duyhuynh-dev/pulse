@@ -8,7 +8,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useAuth } from "@/components/auth-provider";
 
 export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
-  const { isConfigured, isLoading, session, user, signOut } = useAuth();
+  const { isConfigured, isLoading, isAuthenticated, user, signOut, authMethod } = useAuth();
   const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("Use email magic links for Pulse identity, then connect Reddit as a separate signal source.");
@@ -26,10 +26,10 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
       ? "Reddit connected"
       : viewerQuery.data?.redditConnectionMode === "sample"
         ? "Sample profile attached"
-        : session
+        : isAuthenticated
           ? "Ready for Reddit"
           : "Identity only";
-  const accountTitle = session ? "Account status" : "Magic-link sign in";
+  const accountTitle = isAuthenticated ? "Account status" : "Magic-link sign in";
   const containerClass = compact
     ? "rounded-[1.5rem] border border-stroke/80 bg-white/60 p-4 backdrop-blur"
     : "rounded-[1.75rem] border border-stroke bg-white/70 p-4";
@@ -53,7 +53,7 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
   };
 
   const connectReddit = async () => {
-    if (!session) {
+    if (!isAuthenticated) {
       setMessage("Sign in first so Pulse can attach the Reddit connection to your account.");
       return;
     }
@@ -69,7 +69,7 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
   };
 
   const connectSampleProfile = async () => {
-    if (!session) {
+    if (!isAuthenticated) {
       setMessage("Sign in first so Pulse can attach the sample profile to your account.");
       return;
     }
@@ -93,7 +93,7 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
 
   const isLiveRedditConnected = viewerQuery.data?.redditConnectionMode === "live";
   const isSampleAttached = viewerQuery.data?.redditConnectionMode === "sample";
-  const showSignedInAccount = Boolean(session && !isLoading);
+  const showSignedInAccount = Boolean(isAuthenticated && !isLoading);
   const identityLabel = showSignedInAccount ? "Identity set" : redditStatusLabel;
   const signedInMessage = isLiveRedditConnected
     ? "Live Reddit is attached, so this account can stay in the background while Pulse personalizes quietly."
@@ -127,7 +127,7 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
           <p>Supabase browser keys are missing, so the app stays in demo mode until those env vars are added.</p>
         ) : isLoading ? (
           <p>Checking your session...</p>
-        ) : session ? (
+        ) : isAuthenticated ? (
           <div className={compact ? "space-y-3" : "space-y-2"}>
             <div className="rounded-[1.15rem] border border-stroke/80 bg-white/80 px-3 py-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -173,14 +173,20 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke/80 pt-3">
-              <button
-                type="button"
-                onClick={() => setShowSwitchForm((value) => !value)}
-                className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
-              >
-                {showSwitchForm ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                Use another email
-              </button>
+              {authMethod === "supabase" ? (
+                <button
+                  type="button"
+                  onClick={() => setShowSwitchForm((value) => !value)}
+                  className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
+                >
+                  {showSwitchForm ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  Use another email
+                </button>
+              ) : (
+                <span className="text-xs leading-5 text-slate-500">
+                  This Pulse session was started by a provider. Add magic-link sign-in any time.
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => void signOut()}
@@ -226,7 +232,7 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
           <button
             type="button"
             onClick={() => void connectReddit()}
-            disabled={!session || isConnectingReddit}
+            disabled={!isAuthenticated || isConnectingReddit}
             className={
               compact
                 ? "inline-flex items-center justify-center gap-2 rounded-full border border-stroke px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-60"
@@ -240,7 +246,7 @@ export function MagicLinkCard({ compact = false }: { compact?: boolean }) {
           <button
             type="button"
             onClick={() => void connectSampleProfile()}
-            disabled={!session || isLoadingSample}
+            disabled={!isAuthenticated || isLoadingSample}
             className={
               compact
                 ? "inline-flex items-center justify-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"

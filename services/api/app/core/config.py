@@ -36,8 +36,11 @@ class Settings(BaseSettings):
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "http://localhost:8000/v1/spotify/connect/callback"
-    spotify_scopes: str = "user-top-read user-read-recently-played"
+    spotify_scopes: str = "user-read-email user-top-read user-read-recently-played"
     spotify_timeout_seconds: float = 20.0
+    pulse_session_secret: str = ""
+    pulse_session_cookie_name: str = "pulse_session"
+    pulse_session_ttl_seconds: int = 2592000
 
     apple_maps_team_id: str = ""
     apple_maps_key_id: str = ""
