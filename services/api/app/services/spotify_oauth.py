@@ -65,6 +65,20 @@ async def refresh_spotify_access_token(
     )
 
 
+async def fetch_spotify_client_credentials_token(
+    *,
+    settings: Settings | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    resolved = settings or get_settings()
+    _require_spotify_credentials(resolved)
+    return await _token_request(
+        data={"grant_type": "client_credentials"},
+        settings=resolved,
+        client=client,
+    )
+
+
 async def fetch_spotify_profile(
     access_token: str,
     *,

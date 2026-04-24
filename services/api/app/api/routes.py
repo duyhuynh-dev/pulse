@@ -50,7 +50,7 @@ from app.services.reddit_oauth import build_reddit_authorize_url
 from app.services.seed import bootstrap_user_with_mock_reddit
 from app.services.spotify_oauth import build_spotify_authorize_url, exchange_spotify_code, fetch_spotify_profile
 from app.services.worker_sync import trigger_worker_supply_sync
-from app.taste.errors import TasteProviderError
+from app.taste.errors import InsufficientSignalError, TasteProviderError
 from app.taste.profile_contracts import TasteProfile
 from app.taste.profile_service import apply_taste_profile
 from app.taste.providers.manual import ManualThemeProvider
@@ -639,6 +639,18 @@ async def taste_spotify_preview(
     provider = SpotifyProvider()
     try:
         profile = await provider.build_profile(session, connection)
+    except InsufficientSignalError as error:
+        empty_profile = TasteProfile(
+            source="spotify",
+            source_key=connection.provider_user_id or connection.id,
+            username=identity.user.display_name or identity.user.email,
+            themes=[],
+            unmatched_activity={
+                "reason": error.message,
+                "providerUserId": connection.provider_user_id,
+            },
+        )
+        return _serialize_taste_profile(empty_profile)
     except TasteProviderError as error:
         _raise_taste_provider_http_error(error)
     return _serialize_taste_profile(profile)

@@ -80,6 +80,12 @@ export function AccountDock() {
     queryFn: getSpotifyTastePreview,
     enabled: isSignedIn && spotifyConnected,
   });
+  const spotifyThemes = spotifyPreviewQuery.data?.themes ?? [];
+  const hasSpotifyThemes = spotifyThemes.length > 0;
+  const spotifyLowSignalReason =
+    typeof spotifyPreviewQuery.data?.unmatchedActivity?.reason === "string"
+      ? spotifyPreviewQuery.data.unmatchedActivity.reason
+      : "Pulse needs a little more Spotify listening history before it can infer strong nightlife themes.";
 
   useEffect(() => {
     if (!open) {
@@ -301,7 +307,7 @@ export function AccountDock() {
                     <Disc3 className="h-4 w-4" />
                     {isConnectingSpotify ? "Redirecting..." : authMethod === "pulse_session" ? "Reconnect Spotify" : "Connect Spotify"}
                   </button>
-                ) : (
+                ) : hasSpotifyThemes ? (
                   <button
                     type="button"
                     onClick={() => void applySpotifyProfile()}
@@ -310,6 +316,16 @@ export function AccountDock() {
                   >
                     <Disc3 className="h-4 w-4" />
                     {spotifyPreviewQuery.isLoading ? "Reading Spotify..." : "Use Spotify taste"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void spotifyPreviewQuery.refetch()}
+                    disabled={spotifyPreviewQuery.isLoading}
+                    className="inline-flex items-center justify-center gap-2 rounded-full border border-stroke bg-white px-4 py-2.5 text-sm font-medium text-slate-700 disabled:opacity-60"
+                  >
+                    <Disc3 className="h-4 w-4" />
+                    {spotifyPreviewQuery.isLoading ? "Reading Spotify..." : "Refresh Spotify read"}
                   </button>
                 )}
 
@@ -350,19 +366,30 @@ export function AccountDock() {
                       Spotify connected
                     </span>
                   </div>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">
-                    Pulse found {spotifyPreviewQuery.data.themes.length} possible themes from your listening history.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {spotifyPreviewQuery.data.themes.slice(0, 3).map((theme) => (
-                      <span
-                        key={theme.id}
-                        className="rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
-                      >
-                        {theme.label} · {theme.confidenceLabel}
-                      </span>
-                    ))}
-                  </div>
+                  {hasSpotifyThemes ? (
+                    <>
+                      <p className="mt-3 text-sm leading-6 text-slate-600">
+                        Pulse found {spotifyThemes.length} possible themes from your listening history.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {spotifyThemes.slice(0, 3).map((theme) => (
+                          <span
+                            key={theme.id}
+                            className="rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
+                          >
+                            {theme.label} · {theme.confidenceLabel}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-3 text-sm leading-6 text-slate-600">{spotifyLowSignalReason}</p>
+                      <p className="mt-2 text-xs leading-5 text-slate-500">
+                        Keep listening on Spotify for a bit longer, then tap refresh and Pulse will try again.
+                      </p>
+                    </>
+                  )}
                 </div>
               ) : null}
 

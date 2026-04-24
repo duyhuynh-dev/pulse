@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.models.user import OAuthConnection
-from app.services.spotify_oauth import SPOTIFY_API_BASE, fetch_spotify_profile, refresh_spotify_access_token
+from app.services.spotify_oauth import (
+    SPOTIFY_API_BASE,
+    fetch_spotify_client_credentials_token,
+    fetch_spotify_profile,
+    refresh_spotify_access_token,
+)
 from app.taste.errors import InsufficientSignalError, ProviderUnavailableError
 from app.taste.profile_contracts import (
     TasteProfile,
@@ -285,12 +290,61 @@ class SpotifyProvider:
                 ),
             )
 
+            supplemental_artist_ids = _collect_track_artist_ids(
+                top_tracks.get("items", []),
+                recent_tracks.get("items", []),
+            )
+            supplemental_artists = await self._fetch_artists_by_ids(
+                client,
+                access_token,
+                supplemental_artist_ids,
+            )
+
         return {
             "profile": profile,
             "top_artists": top_artists.get("items", []),
             "top_tracks": top_tracks.get("items", []),
             "recent_tracks": recent_tracks.get("items", []),
+            "supplemental_artists": supplemental_artists,
         }
+
+    async def _fetch_artists_by_ids(
+        self,
+        client: httpx.AsyncClient,
+        access_token: str,
+        artist_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        if not artist_ids:
+            return []
+
+        artists: list[dict[str, Any]] = []
+        app_access_token: str | None = None
+        for start in range(0, len(artist_ids), 50):
+            chunk = artist_ids[start : start + 50]
+            try:
+                payload = await self._spotify_get(
+                    client,
+                    access_token,
+                    "/artists",
+                    {"ids": ",".join(chunk)},
+                )
+            except ProviderUnavailableError:
+                if app_access_token is None:
+                    token_payload = await fetch_spotify_client_credentials_token(
+                        settings=self.settings,
+                        client=client,
+                    )
+                    app_access_token = token_payload.get("access_token")
+                if not app_access_token:
+                    return artists
+                payload = await self._spotify_get(
+                    client,
+                    app_access_token,
+                    "/artists",
+                    {"ids": ",".join(chunk)},
+                )
+            artists.extend(payload.get("artists", []) or [])
+        return artists
 
     async def _spotify_get(
         self,
@@ -322,6 +376,7 @@ class SpotifyProvider:
 
     def _score_themes(self, bundle: dict[str, Any]) -> list[TasteTheme]:
         top_artists = bundle["top_artists"]
+        supplemental_artists = bundle.get("supplemental_artists", [])
         top_tracks = bundle["top_tracks"]
         recent_tracks = bundle["recent_tracks"]
 
@@ -361,6 +416,38 @@ class SpotifyProvider:
                         ThemeEvidenceSnippet(
                             type="spotify_artist",
                             snippet=f"Top artist: {artist_name} ({flattened_genres})",
+                        )
+                    )
+
+        for artist in supplemental_artists:
+            genres = [genre.lower() for genre in artist.get("genres", [])]
+            if not genres:
+                continue
+
+            artist_name = artist.get("name") or "Unknown artist"
+            flattened_genres = " · ".join(artist.get("genres", [])[:3])
+
+            for rule in SPOTIFY_THEME_RULES:
+                matched_keywords = {
+                    keyword
+                    for genre in genres
+                    for keyword in rule.genre_keywords
+                    if keyword in genre
+                }
+                if not matched_keywords:
+                    continue
+
+                keyword_score = sum(rule.genre_keywords[keyword] for keyword in matched_keywords)
+                points[rule.theme_id] += keyword_score * 0.55
+                artist_signal_index[rule.theme_id].add(artist_name.lower())
+                for keyword in matched_keywords:
+                    keyword_counts[rule.theme_id][keyword] += 1
+
+                if len(artist_examples[rule.theme_id]) < 2:
+                    artist_examples[rule.theme_id].append(
+                        ThemeEvidenceSnippet(
+                            type="spotify_artist",
+                            snippet=f"Tracked artist: {artist_name} ({flattened_genres})",
                         )
                     )
 
@@ -498,7 +585,7 @@ def _top_unmatched_genres(bundle: dict[str, Any]) -> list[dict[str, int]]:
         for keyword in rule.genre_keywords
     }
     unmatched: Counter[str] = Counter()
-    for artist in bundle["top_artists"]:
+    for artist in [*bundle["top_artists"], *bundle.get("supplemental_artists", [])]:
         for genre in artist.get("genres", []):
             lowered = genre.lower()
             if any(keyword in lowered for keyword in matched_keywords):
@@ -506,3 +593,25 @@ def _top_unmatched_genres(bundle: dict[str, Any]) -> list[dict[str, int]]:
             unmatched[genre] += 1
 
     return [{"genre": genre, "count": count} for genre, count in unmatched.most_common(6)]
+
+
+def _collect_track_artist_ids(top_tracks: list[dict[str, Any]], recent_tracks: list[dict[str, Any]]) -> list[str]:
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+
+    def remember(artist_id: str | None) -> None:
+        if not artist_id or artist_id in seen:
+            return
+        seen.add(artist_id)
+        ordered_ids.append(artist_id)
+
+    for track in top_tracks:
+        for artist in track.get("artists", []):
+            remember(artist.get("id"))
+
+    for item in recent_tracks:
+        track = item.get("track") or {}
+        for artist in track.get("artists", []):
+            remember(artist.get("id"))
+
+    return ordered_ids

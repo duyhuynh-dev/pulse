@@ -151,6 +151,113 @@ async def test_spotify_provider_accepts_broader_mainstream_genres() -> None:
 
 
 @pytest.mark.asyncio
+async def test_spotify_provider_enriches_sparse_tracks_with_artist_metadata() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/me":
+            return httpx.Response(200, json={"id": "spotify-user-5", "display_name": "Sparse"})
+        if request.url.path == "/v1/me/top/artists":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/v1/me/top/tracks":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "name": "beside you",
+                            "artists": [{"id": "artist-keshi", "name": "keshi"}],
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/v1/me/player/recently-played":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/v1/artists":
+            assert request.url.params["ids"] == "artist-keshi"
+            return httpx.Response(
+                200,
+                json={
+                    "artists": [
+                        {
+                            "id": "artist-keshi",
+                            "name": "keshi",
+                            "genres": ["chill r&b", "bedroom pop"],
+                        }
+                    ]
+                },
+            )
+        raise AssertionError(f"Unexpected URL {request.url}")
+
+    provider = SpotifyProvider(
+        settings=Settings(spotify_timeout_seconds=5.0),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    connection = OAuthConnection(provider="spotify", access_token_encrypted="token")
+
+    profile = await provider.build_profile(FakeSession(), connection)
+
+    theme_ids = {theme.id for theme in profile.themes}
+    assert "rooftop_lounges" in theme_ids or "indie_live_music" in theme_ids
+
+
+@pytest.mark.asyncio
+async def test_spotify_provider_falls_back_to_app_token_for_artist_metadata() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/me":
+            return httpx.Response(200, json={"id": "spotify-user-6", "display_name": "Fallback"})
+        if request.url.path == "/v1/me/top/artists":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/v1/me/top/tracks":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "name": "beside you",
+                            "artists": [{"id": "artist-keshi", "name": "keshi"}],
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/v1/me/player/recently-played":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/v1/artists":
+            auth_header = request.headers["Authorization"]
+            if auth_header == "Bearer user-token":
+                return httpx.Response(403, json={"error": {"status": 403}})
+            assert auth_header == "Bearer app-token"
+            return httpx.Response(
+                200,
+                json={
+                    "artists": [
+                        {
+                            "id": "artist-keshi",
+                            "name": "keshi",
+                            "genres": ["chill r&b", "bedroom pop"],
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/api/token":
+            return httpx.Response(200, json={"access_token": "app-token", "token_type": "Bearer"})
+        raise AssertionError(f"Unexpected URL {request.url}")
+
+    provider = SpotifyProvider(
+        settings=Settings(
+            spotify_client_id="client-id",
+            spotify_client_secret="client-secret",
+            spotify_timeout_seconds=5.0,
+        ),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    connection = OAuthConnection(provider="spotify", access_token_encrypted="user-token")
+
+    profile = await provider.build_profile(FakeSession(), connection)
+
+    theme_ids = {theme.id for theme in profile.themes}
+    assert "rooftop_lounges" in theme_ids or "indie_live_music" in theme_ids
+
+
+@pytest.mark.asyncio
 async def test_spotify_provider_raises_when_no_supported_signal_exists() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/me":
@@ -161,9 +268,17 @@ async def test_spotify_provider_raises_when_no_supported_signal_exists() -> None
                 json={"items": [{"name": "Podcast Core", "genres": ["talk"], "popularity": 30}]},
             )
         if request.url.path == "/v1/me/top/tracks":
-            return httpx.Response(200, json={"items": []})
+            return httpx.Response(
+                200,
+                json={"items": [{"name": "No Signal", "artists": [{"id": "artist-talk", "name": "Podcast Core"}]}]},
+            )
         if request.url.path == "/v1/me/player/recently-played":
             return httpx.Response(200, json={"items": []})
+        if request.url.path == "/v1/artists":
+            return httpx.Response(
+                200,
+                json={"artists": [{"id": "artist-talk", "name": "Podcast Core", "genres": ["talk"]}]},
+            )
         raise AssertionError(f"Unexpected URL {request.url}")
 
     provider = SpotifyProvider(
