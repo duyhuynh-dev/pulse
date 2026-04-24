@@ -330,19 +330,25 @@ class SpotifyProvider:
                 )
             except ProviderUnavailableError:
                 if app_access_token is None:
-                    token_payload = await fetch_spotify_client_credentials_token(
-                        settings=self.settings,
-                        client=client,
-                    )
-                    app_access_token = token_payload.get("access_token")
+                    try:
+                        token_payload = await fetch_spotify_client_credentials_token(
+                            settings=self.settings,
+                            client=client,
+                        )
+                        app_access_token = token_payload.get("access_token")
+                    except ProviderUnavailableError:
+                        return artists
                 if not app_access_token:
                     return artists
-                payload = await self._spotify_get(
-                    client,
-                    app_access_token,
-                    "/artists",
-                    {"ids": ",".join(chunk)},
-                )
+                try:
+                    payload = await self._spotify_get(
+                        client,
+                        app_access_token,
+                        "/artists",
+                        {"ids": ",".join(chunk)},
+                    )
+                except ProviderUnavailableError:
+                    return artists
             artists.extend(payload.get("artists", []) or [])
         return artists
 

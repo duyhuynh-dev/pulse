@@ -258,6 +258,47 @@ async def test_spotify_provider_falls_back_to_app_token_for_artist_metadata() ->
 
 
 @pytest.mark.asyncio
+async def test_spotify_provider_ignores_artist_enrichment_when_spotify_blocks_it() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/me":
+            return httpx.Response(200, json={"id": "spotify-user-7", "display_name": "Graceful"})
+        if request.url.path == "/v1/me/top/artists":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/v1/me/top/tracks":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "name": "beside you",
+                            "artists": [{"id": "artist-keshi", "name": "keshi"}],
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/v1/me/player/recently-played":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/v1/artists":
+            return httpx.Response(403, json={"error": {"status": 403}})
+        if request.url.path == "/api/token":
+            return httpx.Response(200, json={"access_token": "app-token", "token_type": "Bearer"})
+        raise AssertionError(f"Unexpected URL {request.url}")
+
+    provider = SpotifyProvider(
+        settings=Settings(
+            spotify_client_id="client-id",
+            spotify_client_secret="client-secret",
+            spotify_timeout_seconds=5.0,
+        ),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    connection = OAuthConnection(provider="spotify", access_token_encrypted="user-token")
+
+    with pytest.raises(InsufficientSignalError):
+        await provider.build_profile(FakeSession(), connection)
+
+
+@pytest.mark.asyncio
 async def test_spotify_provider_raises_when_no_supported_signal_exists() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/me":
