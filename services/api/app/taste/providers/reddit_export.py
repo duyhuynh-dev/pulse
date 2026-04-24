@@ -316,9 +316,12 @@ class RedditExportProvider:
 
         with archive:
             for member_name in archive.namelist():
-                if member_name.endswith("/"):
+                path = Path(member_name)
+                if member_name.endswith("/") or any(part == "__MACOSX" for part in path.parts):
                     continue
-                basename = Path(member_name).name.lower()
+                basename = path.name.lower()
+                if basename.startswith("._"):
+                    continue
                 with archive.open(member_name) as member:
                     member_bytes = member.read()
 
@@ -708,14 +711,19 @@ def _confidence_label(confidence: int) -> str:
 def _is_comment_member(basename: str) -> bool:
     if basename in _COMMENT_FILENAMES:
         return True
-    return "comment" in basename and basename.endswith((".csv", ".json"))
+    return basename.startswith("comments") and basename.endswith((".csv", ".json")) and "header" not in basename
 
 
 def _is_submission_member(basename: str) -> bool:
     if basename in _SUBMISSION_FILENAMES:
         return True
-    return any(token in basename for token in ("post", "submission", "submitted")) and basename.endswith(
-        (".csv", ".json")
+    if not basename.endswith((".csv", ".json")):
+        return False
+    if "header" in basename:
+        return False
+    return any(
+        token in basename
+        for token in ("posts", "post-", "submissions", "submission-", "submitted", "submitted-")
     )
 
 
