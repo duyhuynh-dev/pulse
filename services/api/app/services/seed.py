@@ -107,6 +107,51 @@ DEMO_VENUES = [
         "longitude": -74.0005,
         "apple_place_id": "lpr-demo",
     },
+    {
+        "name": "Artists & Fleas Williamsburg",
+        "neighborhood": "Williamsburg",
+        "address": "70 N 7th St, Brooklyn, NY",
+        "postal_code": "11249",
+        "latitude": 40.7188,
+        "longitude": -73.9601,
+        "apple_place_id": "artists-fleas-demo",
+    },
+    {
+        "name": "McNally Jackson Seaport",
+        "neighborhood": "Financial District",
+        "address": "4 Fulton St, New York, NY",
+        "postal_code": "10038",
+        "latitude": 40.7071,
+        "longitude": -74.0038,
+        "apple_place_id": "mcnally-seaport-demo",
+    },
+    {
+        "name": "NeueHouse Madison Square",
+        "neighborhood": "Nomad",
+        "address": "110 E 25th St, New York, NY",
+        "postal_code": "10010",
+        "latitude": 40.7415,
+        "longitude": -73.9856,
+        "apple_place_id": "neuehouse-demo",
+    },
+    {
+        "name": "Chelsea Market",
+        "neighborhood": "Chelsea",
+        "address": "75 9th Ave, New York, NY",
+        "postal_code": "10011",
+        "latitude": 40.7424,
+        "longitude": -74.0060,
+        "apple_place_id": "chelsea-market-demo",
+    },
+    {
+        "name": "Ace Hotel Brooklyn",
+        "neighborhood": "Downtown Brooklyn",
+        "address": "252 Schermerhorn St, Brooklyn, NY",
+        "postal_code": "11217",
+        "latitude": 40.6884,
+        "longitude": -73.9832,
+        "apple_place_id": "ace-brooklyn-demo",
+    },
 ]
 
 DEMO_EVENT_SPECS = [
@@ -140,12 +185,67 @@ DEMO_EVENT_SPECS = [
         "source_confidence": 0.83,
         "topic_keys": ["indie_live_music"],
     },
+    {
+        "key": "pulse-demo-3",
+        "title": "Brooklyn Collector Swap & Vintage Market",
+        "category": "Market",
+        "summary": "A collector-heavy pop-up with vintage racks, watch traders, and niche gear sellers.",
+        "min_price": 0,
+        "max_price": 15,
+        "source_confidence": 0.79,
+        "topic_keys": ["collector_marketplaces", "style_design_shopping"],
+    },
+    {
+        "key": "pulse-demo-4",
+        "title": "Campus Futures Reading & Conversation",
+        "category": "Talks",
+        "summary": "A book-forward evening with a campus-style talk, reading, and audience discussion.",
+        "min_price": 12,
+        "max_price": 20,
+        "source_confidence": 0.8,
+        "topic_keys": ["student_intellectual_scene", "creative_meetups"],
+    },
+    {
+        "key": "pulse-demo-5",
+        "title": "Founder Mixer and Product Strategy Panel",
+        "category": "Community",
+        "summary": "An ambitious-professional crowd, networking over drinks, and a short operator panel.",
+        "min_price": 25,
+        "max_price": 40,
+        "source_confidence": 0.77,
+        "topic_keys": ["ambitious_professional_scene", "creative_meetups"],
+    },
+    {
+        "key": "pulse-demo-6",
+        "title": "Independent Design Pop-Up and Menswear Rack Sale",
+        "category": "Shopping",
+        "summary": "A boutique-heavy design market with thoughtful retail, vintage finds, and local labels.",
+        "min_price": 0,
+        "max_price": 10,
+        "source_confidence": 0.76,
+        "topic_keys": ["style_design_shopping", "collector_marketplaces"],
+    },
+    {
+        "key": "pulse-demo-7",
+        "title": "Creative Side-Project Meetup",
+        "category": "Community",
+        "summary": "A friendly room for makers, small founders, and people building interesting things together.",
+        "min_price": 0,
+        "max_price": 15,
+        "source_confidence": 0.74,
+        "topic_keys": ["creative_meetups", "ambitious_professional_scene"],
+    },
 ]
 
 DEMO_EVENT_SLOTS = [
     (3, 21, 0),   # Thursday 9:00 PM
     (4, 20, 30),  # Friday 8:30 PM
     (5, 19, 30),  # Saturday 7:30 PM
+    (5, 12, 0),   # Saturday noon
+    (2, 19, 0),   # Wednesday 7:00 PM
+    (3, 18, 30),  # Thursday 6:30 PM
+    (4, 13, 0),   # Friday 1:00 PM
+    (1, 19, 0),   # Tuesday 7:00 PM
 ]
 
 

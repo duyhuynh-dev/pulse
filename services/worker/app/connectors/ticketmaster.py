@@ -11,6 +11,10 @@ TOPIC_HINTS = {
     "indie_live_music": ["indie", "band", "gig", "concert", "songwriter"],
     "gallery_nights": ["gallery", "art", "opening", "installation", "visual"],
     "creative_meetups": ["meetup", "creative", "networking", "community"],
+    "collector_marketplaces": ["market", "swap", "fair", "collector", "vintage", "expo"],
+    "student_intellectual_scene": ["reading", "lecture", "campus", "book", "talk", "discussion"],
+    "ambitious_professional_scene": ["networking", "founder", "industry", "career", "business", "panel"],
+    "style_design_shopping": ["design", "fashion", "boutique", "shopping", "thrift", "popup"],
 }
 
 

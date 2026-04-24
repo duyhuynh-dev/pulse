@@ -29,6 +29,10 @@ TOPIC_HINTS = {
     "indie_live_music": ["alt-pop", "band", "concert", "indie", "live", "performance", "show", "songwriter"],
     "gallery_nights": ["art", "exhibition", "film", "gallery", "installation", "opening", "screening", "visual"],
     "creative_meetups": ["community", "conversation", "meetup", "networking", "talk", "workshop"],
+    "collector_marketplaces": ["market", "swap", "fair", "collector", "vintage", "bazaar"],
+    "student_intellectual_scene": ["book", "campus", "discussion", "lecture", "reading", "seminar", "talk"],
+    "ambitious_professional_scene": ["career", "founder", "industry", "networking", "panel", "professional"],
+    "style_design_shopping": ["boutique", "design", "fashion", "popup", "shopping", "thrift", "vintage"],
 }
 MONTH_NAME_TO_NUMBER = {
     "january": 1,

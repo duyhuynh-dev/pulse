@@ -11,8 +11,14 @@ from app.models.contracts import CandidateEvent, RetrievalQuery
 DEFAULT_SUPPLY_QUERIES = [
     RetrievalQuery(query="techno brooklyn", source="ticketmaster", category="live music"),
     RetrievalQuery(query="indie live music nyc", source="ticketmaster", category="live music"),
+    RetrievalQuery(query="book talk nyc", source="ticketmaster", category="talks"),
+    RetrievalQuery(query="networking panel nyc", source="ticketmaster", category="community"),
+    RetrievalQuery(query="design market brooklyn", source="ticketmaster", category="market"),
+    RetrievalQuery(query="vintage pop up nyc", source="ticketmaster", category="shopping"),
     RetrievalQuery(query="gallery installation nyc", source="curated_venues", category="culture"),
     RetrievalQuery(query="indie songwriter brooklyn", source="curated_venues", category="live music"),
+    RetrievalQuery(query="artist talk brooklyn", source="curated_venues", category="talks"),
+    RetrievalQuery(query="community workshop brooklyn", source="curated_venues", category="community"),
 ]
 SUPPLY_LOOKAHEAD = timedelta(days=90)
 
