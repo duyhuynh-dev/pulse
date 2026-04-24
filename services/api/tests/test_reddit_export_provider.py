@@ -10,7 +10,14 @@ from app.taste.errors import InsufficientSignalError, InvalidRedditExportError
 from app.taste.providers.reddit_export import RedditExportProvider
 
 
-def _build_export_zip(*, comments: list[dict[str, object]], posts: list[dict[str, object]]) -> bytes:
+def _build_export_zip(
+    *,
+    comments: list[dict[str, object]],
+    posts: list[dict[str, object]],
+    saved_posts: list[dict[str, object]] | None = None,
+    saved_comments: list[dict[str, object]] | None = None,
+    subscribed_subreddits: list[dict[str, object]] | None = None,
+) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         comments_io = io.StringIO()
@@ -30,6 +37,27 @@ def _build_export_zip(*, comments: list[dict[str, object]], posts: list[dict[str
         post_writer.writeheader()
         post_writer.writerows(posts)
         archive.writestr("posts.csv", posts_io.getvalue())
+
+        if saved_posts is not None:
+            saved_posts_io = io.StringIO()
+            saved_post_writer = csv.DictWriter(saved_posts_io, fieldnames=["id", "permalink"])
+            saved_post_writer.writeheader()
+            saved_post_writer.writerows(saved_posts)
+            archive.writestr("saved_posts.csv", saved_posts_io.getvalue())
+
+        if saved_comments is not None:
+            saved_comments_io = io.StringIO()
+            saved_comment_writer = csv.DictWriter(saved_comments_io, fieldnames=["id", "permalink"])
+            saved_comment_writer.writeheader()
+            saved_comment_writer.writerows(saved_comments)
+            archive.writestr("saved_comments.csv", saved_comments_io.getvalue())
+
+        if subscribed_subreddits is not None:
+            subscribed_io = io.StringIO()
+            subscribed_writer = csv.DictWriter(subscribed_io, fieldnames=["subreddit"])
+            subscribed_writer.writeheader()
+            subscribed_writer.writerows(subscribed_subreddits)
+            archive.writestr("subscribed_subreddits.csv", subscribed_io.getvalue())
 
     return buffer.getvalue()
 
@@ -163,6 +191,68 @@ def test_reddit_export_provider_raises_insufficient_signal_for_irrelevant_activi
 
     with pytest.raises(InsufficientSignalError):
         provider.build_profile_from_bytes(export_bytes, filename="reddit-export.zip")
+
+
+def test_reddit_export_provider_uses_saved_posts_and_subscriptions_as_signal() -> None:
+    provider = RedditExportProvider()
+    export_bytes = _build_export_zip(
+        comments=[],
+        posts=[],
+        saved_posts=[
+            {
+                "id": "sp1",
+                "permalink": "https://www.reddit.com/r/FoodNYC/comments/xyz123/best_late_night_popup_dinner_in_manhattan/",
+            },
+            {
+                "id": "sp2",
+                "permalink": "https://www.reddit.com/r/indieheads/comments/xyz124/favorite_room_for_a_touring_band_in_brooklyn/",
+            },
+        ],
+        saved_comments=[
+            {
+                "id": "sc1",
+                "permalink": "https://www.reddit.com/r/aves/comments/xyz125/best_warehouse_rave_afters_in_bushwick/sc1/",
+            }
+        ],
+        subscribed_subreddits=[
+            {"subreddit": "rupaulsdragrace"},
+        ],
+    )
+
+    activity = provider.parse_bytes(export_bytes, filename="reddit-export.zip")
+    assert activity.total_comments == 1
+    assert activity.total_submissions == 3
+    assert {summary.subreddit for summary in activity.subreddit_activity} >= {"FoodNYC", "indieheads", "aves", "rupaulsdragrace"}
+
+    profile = provider.build_profile_from_activity(activity)
+    assert {theme.id for theme in profile.themes} >= {
+        "late_night_food",
+        "indie_live_music",
+        "underground_dance",
+        "queer_nightlife",
+    }
+    assert any(
+        example.type in {"saved_submission", "saved_comment", "subscription"}
+        for theme in profile.themes
+        for example in theme.evidence.top_examples
+    )
+
+
+def test_reddit_export_provider_accepts_subscription_only_archives() -> None:
+    provider = RedditExportProvider()
+    export_bytes = _build_export_zip(
+        comments=[],
+        posts=[],
+        subscribed_subreddits=[
+            {"subreddit": "aves"},
+            {"subreddit": "FoodNYC"},
+        ],
+    )
+
+    activity = provider.parse_bytes(export_bytes, filename="reddit-export.zip")
+    assert activity.total_comments == 0
+    assert activity.total_submissions == 2
+    assert [summary.subreddit for summary in activity.subreddit_activity] == ["FoodNYC", "aves"]
 
 
 def test_reddit_export_provider_supports_nested_export_filenames_and_account_csv() -> None:

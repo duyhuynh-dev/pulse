@@ -18,6 +18,7 @@ class RecentComment(BaseModel):
     created_at: datetime
     post_title: str | None = None
     permalink: str | None = None
+    signal_source: Literal["authored", "saved"] = "authored"
 
 
 class RecentSubmission(BaseModel):
@@ -27,6 +28,7 @@ class RecentSubmission(BaseModel):
     created_at: datetime
     permalink: str | None = None
     body: str | None = None
+    signal_source: Literal["authored", "saved", "subscribed"] = "authored"
 
 
 class NormalizedRedditActivity(BaseModel):
@@ -45,4 +47,3 @@ class CachedActivityEnvelope(BaseModel):
     schema_version: str
     saved_at: datetime
     activity: NormalizedRedditActivity
-

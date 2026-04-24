@@ -256,7 +256,7 @@ export function AccountDock() {
         const reason =
           typeof preview.unmatchedActivity?.reason === "string"
             ? preview.unmatchedActivity.reason
-            : "Reddit export did not surface enough nightlife signal yet.";
+            : "Reddit export did not surface enough cultural taste signal yet.";
         setMessage(reason);
       }
     } catch (error) {
@@ -488,7 +488,7 @@ export function AccountDock() {
                       <p className="mt-3 text-sm leading-6 text-slate-600">
                         {typeof redditExportPreview.unmatchedActivity?.reason === "string"
                           ? redditExportPreview.unmatchedActivity.reason
-                          : "Pulse could not find enough nightlife-relevant signal in this export yet."}
+                          : "Pulse could not find enough cultural taste signal in this export yet."}
                       </p>
                     )}
                   </>

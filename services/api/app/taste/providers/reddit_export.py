@@ -232,6 +232,14 @@ REDDIT_THEME_RULES: tuple[RedditThemeRule, ...] = (
 _COMMENT_FILENAMES = ("comments.csv", "comments.json")
 _SUBMISSION_FILENAMES = ("posts.csv", "posts.json", "submissions.csv", "submissions.json")
 _ACCOUNT_FILENAMES = ("account.json", "user.json", "profile.json", "account.csv", "user.csv", "profile.csv")
+_SAVED_COMMENT_FILENAMES = ("saved_comments.csv", "saved_comments.json")
+_SAVED_SUBMISSION_FILENAMES = ("saved_posts.csv", "saved_posts.json", "saved_submissions.csv", "saved_submissions.json")
+_SUBSCRIBED_SUBREDDIT_FILENAMES = (
+    "subscribed_subreddits.csv",
+    "subscribed_subreddits.json",
+    "subscriptions.csv",
+    "subscriptions.json",
+)
 
 
 class RedditExportProvider:
@@ -268,8 +276,21 @@ class RedditExportProvider:
         matched_subreddits_global: set[str] = set()
 
         combined_items: list[tuple[str, RecentComment | RecentSubmission]] = [
-            *[("comment", comment) for comment in activity.recent_comments],
-            *[("submission", submission) for submission in activity.recent_submissions],
+            *[
+                ("saved_comment" if comment.signal_source == "saved" else "comment", comment)
+                for comment in activity.recent_comments
+            ],
+            *[
+                (
+                    "saved_submission"
+                    if submission.signal_source == "saved"
+                    else "subscription"
+                    if submission.signal_source == "subscribed"
+                    else "submission",
+                    submission,
+                )
+                for submission in activity.recent_submissions
+            ],
         ]
 
         for rule in REDDIT_THEME_RULES:
@@ -282,7 +303,7 @@ class RedditExportProvider:
         themes.sort(key=lambda item: item.confidence, reverse=True)
         if not themes:
             raise InsufficientSignalError(
-                "Reddit export did not surface enough nightlife signal yet."
+                "Reddit export did not surface enough cultural taste signal yet."
             )
 
         unmatched_activity = {
@@ -312,6 +333,9 @@ class RedditExportProvider:
 
         comments_rows: list[dict[str, Any]] = []
         submission_rows: list[dict[str, Any]] = []
+        saved_comment_rows: list[dict[str, Any]] = []
+        saved_submission_rows: list[dict[str, Any]] = []
+        subscribed_subreddit_rows: list[dict[str, Any]] = []
         username: str | None = None
 
         with archive:
@@ -331,12 +355,23 @@ class RedditExportProvider:
                 elif _is_submission_member(basename):
                     submission_rows = self._parse_rows(member_bytes, basename)
                     username = username or _extract_username_from_rows(submission_rows)
+                elif _is_saved_comment_member(basename):
+                    saved_comment_rows = self._parse_rows(member_bytes, basename)
+                    username = username or _extract_username_from_rows(saved_comment_rows)
+                elif _is_saved_submission_member(basename):
+                    saved_submission_rows = self._parse_rows(member_bytes, basename)
+                    username = username or _extract_username_from_rows(saved_submission_rows)
+                elif _is_subscribed_subreddit_member(basename):
+                    subscribed_subreddit_rows = self._parse_rows(member_bytes, basename)
                 elif _is_account_member(basename):
                     username = username or _extract_username_from_payload(member_bytes, basename)
 
         return self._build_activity(
             comments_rows,
             submission_rows,
+            saved_comment_rows=saved_comment_rows,
+            saved_submission_rows=saved_submission_rows,
+            subscribed_subreddit_rows=subscribed_subreddit_rows,
             username=username,
             source_key=filename,
         )
@@ -364,6 +399,18 @@ class RedditExportProvider:
         submission_rows = _coerce_json_rows(
             payload.get("posts") or payload.get("submissions") or payload.get("submitted")
         )
+        saved_comment_rows = _coerce_json_rows(payload.get("saved_comments") or payload.get("savedComments"))
+        saved_submission_rows = _coerce_json_rows(
+            payload.get("saved_posts")
+            or payload.get("savedPosts")
+            or payload.get("saved_submissions")
+            or payload.get("savedSubmissions")
+        )
+        subscribed_subreddit_rows = _coerce_json_rows(
+            payload.get("subscribed_subreddits")
+            or payload.get("subscribedSubreddits")
+            or payload.get("subscriptions")
+        )
         username = (
             _string_or_none(payload.get("username"))
             or _string_or_none(payload.get("user"))
@@ -373,6 +420,9 @@ class RedditExportProvider:
         return self._build_activity(
             comments_rows,
             submission_rows,
+            saved_comment_rows=saved_comment_rows,
+            saved_submission_rows=saved_submission_rows,
+            subscribed_subreddit_rows=subscribed_subreddit_rows,
             username=username,
             source_key=filename,
         )
@@ -399,6 +449,9 @@ class RedditExportProvider:
         comments_rows: list[dict[str, Any]],
         submission_rows: list[dict[str, Any]],
         *,
+        saved_comment_rows: list[dict[str, Any]] | None = None,
+        saved_submission_rows: list[dict[str, Any]] | None = None,
+        subscribed_subreddit_rows: list[dict[str, Any]] | None = None,
         username: str | None,
         source_key: str,
     ) -> NormalizedRedditActivity:
@@ -408,9 +461,29 @@ class RedditExportProvider:
             for submission in (_submission_from_row(row) for row in submission_rows)
             if submission is not None
         ]
+        saved_comments = [
+            comment
+            for comment in (_saved_comment_from_row(row) for row in (saved_comment_rows or []))
+            if comment is not None
+        ]
+        saved_submissions = [
+            submission
+            for submission in (_saved_submission_from_row(row) for row in (saved_submission_rows or []))
+            if submission is not None
+        ]
+        subscribed_submissions = [
+            submission
+            for submission in (_subscription_from_row(row) for row in (subscribed_subreddit_rows or []))
+            if submission is not None
+        ]
+        comments.extend(saved_comments)
+        submissions.extend(saved_submissions)
+        submissions.extend(subscribed_submissions)
 
         if not comments and not submissions:
-            raise NoPublicActivityError("The Reddit export did not include usable comments or submissions.")
+            raise NoPublicActivityError(
+                "The Reddit export did not include usable comments, posts, saved items, or followed communities."
+            )
 
         subreddit_counts: dict[str, dict[str, int]] = defaultdict(
             lambda: {"comment_count": 0, "submission_count": 0, "total_karma": 0}
@@ -460,20 +533,25 @@ class RedditExportProvider:
         subreddit_hits: Counter[str] = Counter()
         keyword_hits: Counter[str] = Counter()
         examples: list[ThemeEvidenceSnippet] = []
+        weighted_subreddit_score = 0.0
+        weighted_keyword_score = 0.0
 
         for item_type, item in items:
             subreddit = item.subreddit.lower()
             text = _item_text(item)
             matched = False
             score_bonus = _item_score_bonus(item)
+            source_multiplier = _signal_source_multiplier(item)
 
             if subreddit in rule.subreddit_weights:
-                subreddit_hits[subreddit] += 1 + score_bonus
+                subreddit_hits[subreddit] += 1
+                weighted_subreddit_score += rule.subreddit_weights[subreddit] * 5 * source_multiplier * (1 + (0.25 * score_bonus))
                 matched = True
 
             for keyword in rule.keyword_weights:
                 if keyword in text:
-                    keyword_hits[keyword] += 1 + score_bonus
+                    keyword_hits[keyword] += 1
+                    weighted_keyword_score += rule.keyword_weights[keyword] * 3 * source_multiplier * (1 + (0.25 * score_bonus))
                     matched = True
 
             if matched and len(examples) < 3:
@@ -489,16 +567,8 @@ class RedditExportProvider:
         if not subreddit_hits and not keyword_hits:
             return None
 
-        subreddit_score = sum(
-            min(count, 5) * rule.subreddit_weights[subreddit] * 5
-            for subreddit, count in subreddit_hits.items()
-        )
-        keyword_score = sum(
-            min(count, 5) * rule.keyword_weights[keyword] * 3
-            for keyword, count in keyword_hits.items()
-        )
         diversity_bonus = min(12, len(subreddit_hits) * 3 + len(keyword_hits) * 2)
-        confidence = min(95, subreddit_score + keyword_score + diversity_bonus)
+        confidence = min(95, round(weighted_subreddit_score + weighted_keyword_score + diversity_bonus))
         if confidence < 32 or not examples:
             return None
 
@@ -567,7 +637,7 @@ def _extract_username_from_rows(rows: list[dict[str, Any]]) -> str | None:
 
 
 def _comment_from_row(row: dict[str, Any]) -> RecentComment | None:
-    subreddit = _normalize_subreddit(_first_present(row, "subreddit", "subreddit_name_prefixed"))
+    subreddit = _subreddit_from_row(row)
     body = _first_present(row, "body", "body_md", "comment", "comment_body", "text")
     if not subreddit or not body:
         return None
@@ -579,14 +649,18 @@ def _comment_from_row(row: dict[str, Any]) -> RecentComment | None:
         created_at=_parse_datetime(
             _first_present(row, "created_utc", "created_at", "created", "date", "timestamp", "created")
         ),
-        post_title=_first_present(row, "link_title", "post_title", "submission_title", "title"),
+        post_title=_first_present(row, "link_title", "post_title", "submission_title", "title")
+        or _permalink_title(_first_present(row, "permalink", "link_permalink", "link", "url")),
         permalink=_normalize_permalink(_first_present(row, "permalink", "link_permalink", "link", "url")),
+        signal_source="authored",
     )
 
 
 def _submission_from_row(row: dict[str, Any]) -> RecentSubmission | None:
-    subreddit = _normalize_subreddit(_first_present(row, "subreddit", "subreddit_name_prefixed"))
-    title = _first_present(row, "title", "post_title", "submission_title")
+    subreddit = _subreddit_from_row(row)
+    title = _first_present(row, "title", "post_title", "submission_title") or _permalink_title(
+        _first_present(row, "permalink", "link", "url")
+    )
     if not subreddit or not title:
         return None
 
@@ -599,6 +673,66 @@ def _submission_from_row(row: dict[str, Any]) -> RecentSubmission | None:
         ),
         permalink=_normalize_permalink(_first_present(row, "permalink", "link", "url")),
         body=_first_present(row, "body", "selftext", "selftext_md", "text"),
+        signal_source="authored",
+    )
+
+
+def _saved_comment_from_row(row: dict[str, Any]) -> RecentComment | None:
+    permalink = _normalize_permalink(_first_present(row, "permalink", "link", "url"))
+    subreddit = _subreddit_from_row(row)
+    if not subreddit:
+        return None
+
+    post_title = _first_present(row, "link_title", "post_title", "submission_title", "title") or _permalink_title(permalink)
+    body = _first_present(row, "body", "body_md", "comment", "comment_body", "text")
+    synthesized_body = body or post_title or f"Saved comment in r/{subreddit}"
+
+    return RecentComment(
+        subreddit=subreddit,
+        body=synthesized_body,
+        score=_parse_int(_first_present(row, "score", "karma", "ups", "comment_karma")) or 0,
+        created_at=_parse_datetime(
+            _first_present(row, "saved_at", "created_utc", "created_at", "created", "date", "timestamp")
+        ),
+        post_title=post_title,
+        permalink=permalink,
+        signal_source="saved",
+    )
+
+
+def _saved_submission_from_row(row: dict[str, Any]) -> RecentSubmission | None:
+    permalink = _normalize_permalink(_first_present(row, "permalink", "link", "url"))
+    subreddit = _subreddit_from_row(row)
+    title = _first_present(row, "title", "post_title", "submission_title") or _permalink_title(permalink)
+    if not subreddit or not title:
+        return None
+
+    return RecentSubmission(
+        subreddit=subreddit,
+        title=title,
+        score=_parse_int(_first_present(row, "score", "karma", "ups")) or 0,
+        created_at=_parse_datetime(
+            _first_present(row, "saved_at", "created_utc", "created_at", "created", "date", "timestamp")
+        ),
+        permalink=permalink,
+        body=_first_present(row, "body", "selftext", "selftext_md", "text"),
+        signal_source="saved",
+    )
+
+
+def _subscription_from_row(row: dict[str, Any]) -> RecentSubmission | None:
+    subreddit = _normalize_subreddit(
+        _first_present(row, "subreddit", "subreddit_name_prefixed", "display_name", "name")
+    )
+    if not subreddit:
+        return None
+
+    return RecentSubmission(
+        subreddit=subreddit,
+        title=f"Subscribed to r/{subreddit}",
+        score=0,
+        created_at=_parse_datetime(_first_present(row, "created_at", "created", "timestamp")),
+        signal_source="subscribed",
     )
 
 
@@ -666,6 +800,41 @@ def _normalize_subreddit(value: str | None) -> str | None:
     return normalized
 
 
+def _subreddit_from_row(row: dict[str, Any]) -> str | None:
+    explicit = _normalize_subreddit(_first_present(row, "subreddit", "subreddit_name_prefixed"))
+    if explicit:
+        return explicit
+    return _permalink_subreddit(_first_present(row, "permalink", "link_permalink", "link", "url"))
+
+
+def _permalink_subreddit(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    marker = "/r/"
+    if marker not in normalized:
+        return None
+    tail = normalized.split(marker, 1)[1]
+    subreddit = tail.split("/", 1)[0].strip()
+    return subreddit or None
+
+
+def _permalink_title(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().rstrip("/")
+    marker = "/comments/"
+    if marker not in normalized:
+        return None
+    tail = normalized.split(marker, 1)[1]
+    parts = [part for part in tail.split("/") if part]
+    if len(parts) < 2:
+        return None
+    slug = parts[1]
+    words = slug.replace("_", " ").replace("-", " ").strip()
+    return words or None
+
+
 def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
@@ -689,6 +858,15 @@ def _item_score_bonus(item: RecentComment | RecentSubmission) -> int:
     if item.score >= 5:
         return 1
     return 0
+
+
+def _signal_source_multiplier(item: RecentComment | RecentSubmission) -> float:
+    signal_source = getattr(item, "signal_source", "authored")
+    if signal_source == "saved":
+        return 1.5
+    if signal_source == "subscribed":
+        return 2.0
+    return 1.0
 
 
 def _example_snippet(item: RecentComment | RecentSubmission) -> str:
@@ -724,6 +902,30 @@ def _is_submission_member(basename: str) -> bool:
     return any(
         token in basename
         for token in ("posts", "post-", "submissions", "submission-", "submitted", "submitted-")
+    )
+
+
+def _is_saved_comment_member(basename: str) -> bool:
+    if basename in _SAVED_COMMENT_FILENAMES:
+        return True
+    return basename.startswith("saved_comments") and basename.endswith((".csv", ".json"))
+
+
+def _is_saved_submission_member(basename: str) -> bool:
+    if basename in _SAVED_SUBMISSION_FILENAMES:
+        return True
+    return (
+        basename.endswith((".csv", ".json"))
+        and ("saved_posts" in basename or "saved_submissions" in basename)
+        and "header" not in basename
+    )
+
+
+def _is_subscribed_subreddit_member(basename: str) -> bool:
+    if basename in _SUBSCRIBED_SUBREDDIT_FILENAMES:
+        return True
+    return basename.endswith((".csv", ".json")) and (
+        "subscribed_subreddits" in basename or basename.startswith("subscriptions")
     )
 
 

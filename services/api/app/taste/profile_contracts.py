@@ -13,6 +13,9 @@ class ThemeEvidenceSnippet(BaseModel):
     type: Literal[
         "comment",
         "submission",
+        "saved_comment",
+        "saved_submission",
+        "subscription",
         "manual",
         "provider_note",
         "spotify_artist",
