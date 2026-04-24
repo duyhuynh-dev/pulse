@@ -78,10 +78,19 @@ export function PulseShell() {
 
   const refreshMutation = useMutation({
     mutationFn: refreshRecommendations,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["map-recommendations"] });
-      void queryClient.invalidateQueries({ queryKey: ["archive"] });
-    }
+    onMutate: () => {
+      setSurfaceStatus("Re-ranking your shortlist around the latest taste signals and saved events...");
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["map-recommendations"] }),
+        queryClient.invalidateQueries({ queryKey: ["archive"] }),
+      ]);
+      setSurfaceStatus("Shortlist refreshed. Pulse just re-ranked the map around your current profile.");
+    },
+    onError: (error) => {
+      setSurfaceStatus(error instanceof Error ? error.message : "Unable to re-rank the shortlist right now.");
+    },
   });
 
   const syncSupplyMutation = useMutation({
