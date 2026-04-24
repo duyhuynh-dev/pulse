@@ -11,7 +11,6 @@ dependencies = [
   "pydantic-ai>=0.0.24",
   "pydantic-settings>=2.7.1",
   "selectolax>=0.3.27",
-  "sentence-transformers>=3.3.1",
   "uvicorn>=0.34.0"
 ]
 
