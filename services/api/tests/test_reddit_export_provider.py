@@ -163,3 +163,91 @@ def test_reddit_export_provider_raises_insufficient_signal_for_irrelevant_activi
 
     with pytest.raises(InsufficientSignalError):
         provider.build_profile_from_bytes(export_bytes, filename="reddit-export.zip")
+
+
+def test_reddit_export_provider_supports_nested_export_filenames_and_account_csv() -> None:
+    provider = RedditExportProvider()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        account_io = io.StringIO()
+        account_writer = csv.DictWriter(account_io, fieldnames=["username"])
+        account_writer.writeheader()
+        account_writer.writerow({"username": "nested-duy"})
+        archive.writestr("reddit/account.csv", account_io.getvalue())
+
+        comments_io = io.StringIO()
+        comment_writer = csv.DictWriter(
+            comments_io,
+            fieldnames=["subreddit_name_prefixed", "body_md", "score", "created_at", "link_title", "link_permalink"],
+        )
+        comment_writer.writeheader()
+        comment_writer.writerow(
+            {
+                "subreddit_name_prefixed": "r/aves",
+                "body_md": "Need another rooftop afters with a real sound system.",
+                "score": 23,
+                "created_at": "2026-04-01T03:00:00Z",
+                "link_title": "Bushwick night recs",
+                "link_permalink": "/r/aves/comments/x1/comment/y1/",
+            }
+        )
+        archive.writestr("reddit_data/comments-2026.csv", comments_io.getvalue())
+
+        posts_io = io.StringIO()
+        post_writer = csv.DictWriter(
+            posts_io,
+            fieldnames=["subreddit_name_prefixed", "title", "selftext_md", "score", "created_at", "permalink"],
+        )
+        post_writer.writeheader()
+        post_writer.writerow(
+            {
+                "subreddit_name_prefixed": "r/FoodNYC",
+                "title": "Best popup dinner after midnight?",
+                "selftext_md": "Need an omakase-ish late night plan.",
+                "score": 18,
+                "created_at": "2026-04-02T04:00:00Z",
+                "permalink": "/r/FoodNYC/comments/x2/best_popup_dinner/",
+            }
+        )
+        archive.writestr("archive/submitted-posts.csv", posts_io.getvalue())
+
+    activity = provider.parse_bytes(buffer.getvalue(), filename="nested-export.zip")
+
+    assert activity.username == "nested-duy"
+    assert activity.recent_comments[0].subreddit == "aves"
+    assert activity.recent_comments[0].score == 23
+    assert activity.recent_submissions[0].subreddit == "FoodNYC"
+    profile = provider.build_profile_from_activity(activity)
+    assert {theme.id for theme in profile.themes} & {"underground_dance", "late_night_food", "rooftop_lounges"}
+
+
+def test_reddit_export_provider_supports_json_array_payloads() -> None:
+    provider = RedditExportProvider()
+    payload = [
+        {
+            "author": "duy",
+            "subreddit": "indieheads",
+            "title": "Best room for a touring band",
+            "selftext": "Need a venue rec.",
+            "score": 9,
+            "created_utc": 1713884400,
+            "permalink": "/r/indieheads/comments/post1/venue_question/",
+        },
+        {
+            "author": "duy",
+            "subreddit": "aves",
+            "body": "Any good warehouse rave afters?",
+            "link_title": "Bushwick afters",
+            "score": 12,
+            "created_utc": 1713877200,
+            "permalink": "/r/aves/comments/c1/",
+        },
+    ]
+
+    activity = provider.parse_bytes(
+        io.BytesIO(str(payload).replace("'", '"').encode("utf-8")).getvalue(),
+        filename="reddit-export.json",
+    )
+
+    assert activity.total_comments == 1
+    assert activity.total_submissions == 1

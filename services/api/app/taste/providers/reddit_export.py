@@ -231,6 +231,7 @@ REDDIT_THEME_RULES: tuple[RedditThemeRule, ...] = (
 
 _COMMENT_FILENAMES = ("comments.csv", "comments.json")
 _SUBMISSION_FILENAMES = ("posts.csv", "posts.json", "submissions.csv", "submissions.json")
+_ACCOUNT_FILENAMES = ("account.json", "user.json", "profile.json", "account.csv", "user.csv", "profile.csv")
 
 
 class RedditExportProvider:
@@ -321,14 +322,14 @@ class RedditExportProvider:
                 with archive.open(member_name) as member:
                     member_bytes = member.read()
 
-                if basename in _COMMENT_FILENAMES:
+                if _is_comment_member(basename):
                     comments_rows = self._parse_rows(member_bytes, basename)
                     username = username or _extract_username_from_rows(comments_rows)
-                elif basename in _SUBMISSION_FILENAMES:
+                elif _is_submission_member(basename):
                     submission_rows = self._parse_rows(member_bytes, basename)
                     username = username or _extract_username_from_rows(submission_rows)
-                elif basename in {"account.json", "user.json", "profile.json"}:
-                    username = username or _extract_username_from_json(member_bytes)
+                elif _is_account_member(basename):
+                    username = username or _extract_username_from_payload(member_bytes, basename)
 
         return self._build_activity(
             comments_rows,
@@ -343,8 +344,18 @@ class RedditExportProvider:
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise InvalidRedditExportError("Unable to parse the uploaded Reddit export JSON.") from error
 
+        if isinstance(payload, list):
+            rows = _coerce_json_rows(payload)
+            comment_rows, submission_rows = _split_rows_by_shape(rows)
+            return self._build_activity(
+                comment_rows,
+                submission_rows,
+                username=None,
+                source_key=filename,
+            )
+
         if not isinstance(payload, dict):
-            raise InvalidRedditExportError("Reddit export JSON must be an object.")
+            raise InvalidRedditExportError("Reddit export JSON must be an object or an array.")
 
         comments_rows = _coerce_json_rows(payload.get("comments"))
         submission_rows = _coerce_json_rows(
@@ -451,14 +462,15 @@ class RedditExportProvider:
             subreddit = item.subreddit.lower()
             text = _item_text(item)
             matched = False
+            score_bonus = _item_score_bonus(item)
 
             if subreddit in rule.subreddit_weights:
-                subreddit_hits[subreddit] += 1
+                subreddit_hits[subreddit] += 1 + score_bonus
                 matched = True
 
             for keyword in rule.keyword_weights:
                 if keyword in text:
-                    keyword_hits[keyword] += 1
+                    keyword_hits[keyword] += 1 + score_bonus
                     matched = True
 
             if matched and len(examples) < 3:
@@ -474,11 +486,16 @@ class RedditExportProvider:
         if not subreddit_hits and not keyword_hits:
             return None
 
-        confidence = min(
-            95,
-            sum(min(count, 4) * rule.subreddit_weights[subreddit] * 6 for subreddit, count in subreddit_hits.items())
-            + sum(min(count, 4) * rule.keyword_weights[keyword] * 3 for keyword, count in keyword_hits.items()),
+        subreddit_score = sum(
+            min(count, 5) * rule.subreddit_weights[subreddit] * 5
+            for subreddit, count in subreddit_hits.items()
         )
+        keyword_score = sum(
+            min(count, 5) * rule.keyword_weights[keyword] * 3
+            for keyword, count in keyword_hits.items()
+        )
+        diversity_bonus = min(12, len(subreddit_hits) * 3 + len(keyword_hits) * 2)
+        confidence = min(95, subreddit_score + keyword_score + diversity_bonus)
         if confidence < 32 or not examples:
             return None
 
@@ -525,8 +542,17 @@ def _extract_username_from_json(raw_bytes: bytes) -> str | None:
     return (
         _string_or_none(payload.get("username"))
         or _string_or_none(payload.get("user"))
+        or _string_or_none(payload.get("name"))
         or _string_or_none((payload.get("account") or {}).get("username"))
     )
+
+
+def _extract_username_from_payload(raw_bytes: bytes, filename: str) -> str | None:
+    if filename.endswith(".json"):
+        return _extract_username_from_json(raw_bytes)
+
+    rows = RedditExportProvider()._parse_rows(raw_bytes, filename)
+    return _extract_username_from_rows(rows)
 
 
 def _extract_username_from_rows(rows: list[dict[str, Any]]) -> str | None:
@@ -538,25 +564,25 @@ def _extract_username_from_rows(rows: list[dict[str, Any]]) -> str | None:
 
 
 def _comment_from_row(row: dict[str, Any]) -> RecentComment | None:
-    subreddit = _first_present(row, "subreddit")
-    body = _first_present(row, "body", "comment", "comment_body", "text")
+    subreddit = _normalize_subreddit(_first_present(row, "subreddit", "subreddit_name_prefixed"))
+    body = _first_present(row, "body", "body_md", "comment", "comment_body", "text")
     if not subreddit or not body:
         return None
 
     return RecentComment(
         subreddit=subreddit,
         body=body,
-        score=_parse_int(_first_present(row, "score", "karma", "ups")) or 0,
+        score=_parse_int(_first_present(row, "score", "karma", "ups", "comment_karma")) or 0,
         created_at=_parse_datetime(
-            _first_present(row, "created_utc", "created_at", "created", "date", "timestamp")
+            _first_present(row, "created_utc", "created_at", "created", "date", "timestamp", "created")
         ),
         post_title=_first_present(row, "link_title", "post_title", "submission_title", "title"),
-        permalink=_normalize_permalink(_first_present(row, "permalink", "link", "url")),
+        permalink=_normalize_permalink(_first_present(row, "permalink", "link_permalink", "link", "url")),
     )
 
 
 def _submission_from_row(row: dict[str, Any]) -> RecentSubmission | None:
-    subreddit = _first_present(row, "subreddit")
+    subreddit = _normalize_subreddit(_first_present(row, "subreddit", "subreddit_name_prefixed"))
     title = _first_present(row, "title", "post_title", "submission_title")
     if not subreddit or not title:
         return None
@@ -569,7 +595,7 @@ def _submission_from_row(row: dict[str, Any]) -> RecentSubmission | None:
             _first_present(row, "created_utc", "created_at", "created", "date", "timestamp")
         ),
         permalink=_normalize_permalink(_first_present(row, "permalink", "link", "url")),
-        body=_first_present(row, "body", "selftext", "text"),
+        body=_first_present(row, "body", "selftext", "selftext_md", "text"),
     )
 
 
@@ -628,6 +654,15 @@ def _normalize_permalink(value: str | None) -> str | None:
     return value
 
 
+def _normalize_subreddit(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if normalized.lower().startswith("r/"):
+        return normalized[2:]
+    return normalized
+
+
 def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
@@ -645,6 +680,14 @@ def _item_text(item: RecentComment | RecentSubmission) -> str:
     return " ".join(part.lower() for part in parts if part)
 
 
+def _item_score_bonus(item: RecentComment | RecentSubmission) -> int:
+    if item.score >= 20:
+        return 2
+    if item.score >= 5:
+        return 1
+    return 0
+
+
 def _example_snippet(item: RecentComment | RecentSubmission) -> str:
     source_text = getattr(item, "body", None) or getattr(item, "title", None) or getattr(item, "post_title", None)
     if source_text is None:
@@ -660,3 +703,38 @@ def _confidence_label(confidence: int) -> str:
     if confidence >= 40:
         return "Emerging"
     return "Weak"
+
+
+def _is_comment_member(basename: str) -> bool:
+    if basename in _COMMENT_FILENAMES:
+        return True
+    return "comment" in basename and basename.endswith((".csv", ".json"))
+
+
+def _is_submission_member(basename: str) -> bool:
+    if basename in _SUBMISSION_FILENAMES:
+        return True
+    return any(token in basename for token in ("post", "submission", "submitted")) and basename.endswith(
+        (".csv", ".json")
+    )
+
+
+def _is_account_member(basename: str) -> bool:
+    if basename in _ACCOUNT_FILENAMES:
+        return True
+    return "account" in basename and basename.endswith((".csv", ".json"))
+
+
+def _split_rows_by_shape(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    comments: list[dict[str, Any]] = []
+    submissions: list[dict[str, Any]] = []
+    for row in rows:
+        if _first_present(row, "comment", "comment_body", "body", "body_md") and _first_present(
+            row, "link_title", "post_title", "submission_title"
+        ):
+            comments.append(row)
+        elif _first_present(row, "title", "post_title", "submission_title"):
+            submissions.append(row)
+        elif _first_present(row, "comment", "comment_body", "body", "body_md"):
+            comments.append(row)
+    return comments, submissions
