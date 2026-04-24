@@ -55,6 +55,13 @@ TOPIC_CATEGORY_HINTS = {
     "ambitious_professional_scene": ["career", "founder", "industry", "networking", "panel", "professional", "speaker", "talk"],
     "style_design_shopping": ["boutique", "design", "fashion", "market", "popup", "shopping", "thrift", "vintage"],
 }
+BROAD_CULTURAL_THEME_KEYS = {
+    "collector_marketplaces",
+    "student_intellectual_scene",
+    "ambitious_professional_scene",
+    "style_design_shopping",
+    "creative_meetups",
+}
 
 
 @dataclass
@@ -565,6 +572,98 @@ def _secondary_events_payload(entries: list[dict]) -> list[dict]:
     return payload
 
 
+def _dominant_topic_key(topic_keys: list[str], profiles_by_key: dict[str, UserInterestProfile]) -> str | None:
+    best_key: str | None = None
+    best_weight = -1.0
+    for key in topic_keys:
+        topic = profiles_by_key.get(key)
+        if topic is None:
+            continue
+        weight = _topic_weight(topic)
+        if weight > best_weight:
+            best_weight = weight
+            best_key = key
+    return best_key or (topic_keys[0] if topic_keys else None)
+
+
+def _active_theme_keys(profiles_by_key: dict[str, UserInterestProfile]) -> set[str]:
+    return {
+        key
+        for key, topic in profiles_by_key.items()
+        if not topic.muted and topic.confidence >= 0.6
+    }
+
+
+def _selection_mix_score(
+    primary: dict,
+    *,
+    chosen_entries: list[dict],
+    preferred_theme_keys: set[str],
+) -> float:
+    score = primary["score"]
+    category = _normalize_text(primary.get("category"))
+    topic_keys = set(primary.get("topic_keys", []))
+    dominant_topic_key = primary.get("dominant_topic_key")
+
+    chosen_categories = [_normalize_text(entry.get("category")) for entry in chosen_entries]
+    chosen_dominant_topics = [entry.get("dominant_topic_key") for entry in chosen_entries]
+    covered_theme_keys = {
+        key
+        for entry in chosen_entries
+        for key in entry.get("topic_keys", [])
+    }
+
+    if dominant_topic_key and dominant_topic_key in preferred_theme_keys and dominant_topic_key not in covered_theme_keys:
+        score += 0.06
+
+    uncovered_broad_topics = (topic_keys & preferred_theme_keys & BROAD_CULTURAL_THEME_KEYS) - covered_theme_keys
+    if uncovered_broad_topics:
+        score += 0.04
+
+    duplicate_category_count = sum(1 for chosen_category in chosen_categories if category and chosen_category == category)
+    duplicate_topic_count = sum(
+        1 for chosen_topic in chosen_dominant_topics if dominant_topic_key and chosen_topic == dominant_topic_key
+    )
+
+    score -= duplicate_category_count * 0.03
+    score -= duplicate_topic_count * 0.05
+    return score
+
+
+def _select_ranked_venues(
+    ranked_venues: list[list[dict]],
+    profiles_by_key: dict[str, UserInterestProfile],
+    *,
+    limit: int = 8,
+) -> list[list[dict]]:
+    if len(ranked_venues) <= limit:
+        return ranked_venues
+
+    preferred_theme_keys = _active_theme_keys(profiles_by_key)
+    remaining = [entries for entries in ranked_venues if entries]
+    chosen: list[list[dict]] = []
+    chosen_entries: list[dict] = []
+
+    while remaining and len(chosen) < limit:
+        best_index = 0
+        best_score = float("-inf")
+        for index, entries in enumerate(remaining):
+            selection_score = _selection_mix_score(
+                entries[0],
+                chosen_entries=chosen_entries,
+                preferred_theme_keys=preferred_theme_keys,
+            )
+            if selection_score > best_score:
+                best_score = selection_score
+                best_index = index
+
+        selected_entries = remaining.pop(best_index)
+        chosen.append(selected_entries)
+        chosen_entries.append(selected_entries[0])
+
+    return chosen
+
+
 def _archive_kind(provider: str | None) -> str:
     if not provider:
         return "live"
@@ -750,6 +849,9 @@ async def refresh_recommendations_for_user(
             "travel": travel,
             "score": adjusted_score,
             "score_band": _score_band(adjusted_score),
+            "category": event.category,
+            "topic_keys": topic_keys,
+            "dominant_topic_key": _dominant_topic_key(topic_keys, profiles_by_key),
             "reasons": _reason_items(
                 matched_topics=matched_topics,
                 muted_topics=muted_topics,
@@ -780,7 +882,9 @@ async def refresh_recommendations_for_user(
         reverse=True,
     )
 
-    for rank, entries in enumerate(ranked_venues[:8], start=1):
+    selected_ranked_venues = _select_ranked_venues(ranked_venues, profiles_by_key, limit=8)
+
+    for rank, entries in enumerate(selected_ranked_venues, start=1):
         primary = entries[0]
         session.add(
             VenueRecommendation(

@@ -13,6 +13,7 @@ from app.services.recommendations import (
     _occurrence_is_rankable,
     _parse_occurrence_start,
     _score_band,
+    _select_ranked_venues,
 )
 from datetime import UTC, datetime, timedelta
 
@@ -267,6 +268,45 @@ def test_candidate_score_category_affinity_lifts_talks_for_intellectual_scene() 
     )
 
     assert talk_score > nightlife_score
+
+
+def test_select_ranked_venues_keeps_broader_theme_match_in_top_mix() -> None:
+    profiles_by_key = {
+        "underground_dance": UserInterestProfile(
+            user_id="user-1",
+            topic_key="underground_dance",
+            label="Underground dance",
+            confidence=0.94,
+            boosted=False,
+            muted=False,
+        ),
+        "collector_marketplaces": UserInterestProfile(
+            user_id="user-1",
+            topic_key="collector_marketplaces",
+            label="Collector marketplaces",
+            confidence=0.95,
+            boosted=False,
+            muted=False,
+        ),
+    }
+
+    nightlife_entries = [
+        [{"score": 0.92, "category": "live music", "topic_keys": ["underground_dance"], "dominant_topic_key": "underground_dance"}],
+        [{"score": 0.9, "category": "live music", "topic_keys": ["underground_dance"], "dominant_topic_key": "underground_dance"}],
+        [{"score": 0.88, "category": "live music", "topic_keys": ["underground_dance"], "dominant_topic_key": "underground_dance"}],
+    ]
+    market_entry = [
+        {"score": 0.85, "category": "market", "topic_keys": ["collector_marketplaces"], "dominant_topic_key": "collector_marketplaces"}
+    ]
+
+    selected = _select_ranked_venues(
+        nightlife_entries + [market_entry],
+        profiles_by_key,
+        limit=3,
+    )
+
+    selected_dominant_topics = [entries[0]["dominant_topic_key"] for entries in selected]
+    assert "collector_marketplaces" in selected_dominant_topics
 
 
 def test_feedback_adjustment_penalizes_dismissed_patterns() -> None:
