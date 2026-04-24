@@ -234,7 +234,10 @@ def _average_feedback_weight(keys: list[str], store: dict[str, float]) -> float:
 def _topic_weight(topic: UserInterestProfile) -> float:
     if topic.muted:
         return 0.05
-    return min(0.98, 0.2 + (topic.confidence * 0.55) + (0.15 if topic.boosted else 0.0))
+    base = 0.24 + (topic.confidence * 0.64)
+    if topic.boosted:
+        base += 0.12
+    return min(0.99, base)
 
 
 def _interest_fit(
@@ -242,7 +245,7 @@ def _interest_fit(
     profiles_by_key: dict[str, UserInterestProfile],
 ) -> tuple[float, list[UserInterestProfile], list[UserInterestProfile]]:
     if not topic_keys:
-        return (0.58, [], [])
+        return (0.34, [], [])
 
     matched_topics: list[UserInterestProfile] = []
     muted_topics: list[UserInterestProfile] = []
@@ -260,9 +263,12 @@ def _interest_fit(
         weights.append(_topic_weight(topic))
 
     if not weights:
-        return (0.58, [], [])
+        return (0.34, [], [])
 
-    score = sum(weights) / len(weights)
+    average_weight = sum(weights) / len(weights)
+    strongest_weight = max(weights)
+    diversity_bonus = min(0.10, max(0, len(matched_topics) - 1) * 0.04)
+    score = (average_weight * 0.62) + (strongest_weight * 0.38) + diversity_bonus
     if muted_topics and not matched_topics:
         score *= 0.35
     elif muted_topics:
@@ -466,10 +472,10 @@ def _candidate_score(
 ) -> tuple[float, list[UserInterestProfile], list[UserInterestProfile]]:
     interest_fit, matched_topics, muted_topics = _interest_fit(topic_keys, profiles_by_key)
     total_score = _clamp_score(
-        (interest_fit * 0.58)
-        + (_distance_fit(transit_minutes) * 0.17)
-        + (budget_fit * 0.15)
-        + (source_confidence * 0.10)
+        (interest_fit * 0.7)
+        + (_distance_fit(transit_minutes) * 0.13)
+        + (budget_fit * 0.10)
+        + (source_confidence * 0.07)
     )
     return total_score, matched_topics, muted_topics
 

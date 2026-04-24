@@ -93,6 +93,20 @@ def test_topic_keys_can_be_derived_from_event_text() -> None:
     assert "gallery_nights" in topic_keys
 
 
+def test_topic_keys_cover_broader_cultural_themes() -> None:
+    event = CanonicalEvent(
+        source_id="source-1",
+        source_event_key="event-2",
+        title="Brooklyn vintage market and design pop-up",
+        category="shopping",
+        summary="A boutique-heavy collector fair with menswear racks and local design labels.",
+    )
+
+    topic_keys = _derive_topic_keys(event, ["popup market", "vintage", "collector"])
+    assert "collector_marketplaces" in topic_keys
+    assert "style_design_shopping" in topic_keys
+
+
 def test_feedback_adjustment_boosts_saved_venue_and_topics() -> None:
     profiles_by_key = {
         "indie_live_music": UserInterestProfile(
@@ -129,6 +143,46 @@ def test_feedback_adjustment_boosts_saved_venue_and_topics() -> None:
     assert adjustment > 0
     assert feedback_reason is not None
     assert feedback_reason["title"] == "Saved before"
+
+
+def test_candidate_score_strong_match_beats_generic_event() -> None:
+    profiles_by_key = {
+        "collector_marketplaces": UserInterestProfile(
+            user_id="user-1",
+            topic_key="collector_marketplaces",
+            label="Collector marketplaces",
+            confidence=0.95,
+            boosted=False,
+            muted=False,
+        ),
+        "style_design_shopping": UserInterestProfile(
+            user_id="user-1",
+            topic_key="style_design_shopping",
+            label="Style / design shopping",
+            confidence=0.82,
+            boosted=False,
+            muted=False,
+        ),
+    }
+
+    matched_score, matched_topics, _ = _candidate_score(
+        ["collector_marketplaces", "style_design_shopping"],
+        profiles_by_key,
+        source_confidence=0.76,
+        transit_minutes=30,
+        budget_fit=0.9,
+    )
+    generic_score, generic_topics, _ = _candidate_score(
+        [],
+        profiles_by_key,
+        source_confidence=0.92,
+        transit_minutes=20,
+        budget_fit=0.92,
+    )
+
+    assert matched_score > generic_score
+    assert [topic.label for topic in matched_topics] == ["Collector marketplaces", "Style / design shopping"]
+    assert generic_topics == []
 
 
 def test_feedback_adjustment_penalizes_dismissed_patterns() -> None:
