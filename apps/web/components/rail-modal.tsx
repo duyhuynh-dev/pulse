@@ -125,16 +125,12 @@ export function RailModal({ open, title, onClose, children }: RailModalProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
+      className="fixed inset-0 z-[40] flex items-center justify-center p-4 sm:p-6"
     >
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-black/30 transition-opacity duration-200"
+        className="absolute inset-0 z-0 bg-black/30 transition-opacity duration-200"
+        onClick={onClose}
         style={{
           opacity: isVisible ? 1 : 0,
           backdropFilter: isVisible ? "blur(12px)" : "blur(0px)",
@@ -147,7 +143,8 @@ export function RailModal({ open, title, onClose, children }: RailModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative z-10 flex max-h-[calc(100vh-80px)] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-[2rem] border border-stroke/80 bg-card shadow-2xl"
+        className="relative z-[50] flex max-h-[calc(100vh-80px)] w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-[2rem] border border-stroke/80 bg-card shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
         style={{
           opacity: isVisible ? 1 : 0,
           transform: isVisible ? "scale(1)" : "scale(0.96)",

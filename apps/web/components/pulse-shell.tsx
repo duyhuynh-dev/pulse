@@ -160,7 +160,7 @@ export function PulseShell() {
   return (
     <main className="min-h-screen px-4 py-4 md:px-6 md:py-6">
       <div className="mx-auto flex max-w-[1680px] flex-col gap-4 xl:h-[calc(100vh-3rem)]">
-        <header className="relative z-[60] overflow-visible rounded-[1.5rem] border border-stroke/80 bg-card/80 px-5 py-3.5 shadow-float backdrop-blur">
+        <header className="relative z-[30] overflow-visible rounded-[1.5rem] border border-stroke/80 bg-card/80 px-5 py-3.5 shadow-float backdrop-blur">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-slate-600">
