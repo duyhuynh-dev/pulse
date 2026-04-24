@@ -14,9 +14,12 @@ import {
   X,
 } from "lucide-react";
 import {
+  applyManualTaste,
   applySpotifyTaste,
   getAuthViewer,
   getSpotifyTastePreview,
+  getTasteThemes,
+  previewManualTaste,
   startMockRedditConnection,
   startRedditConnection,
   startSpotifyConnection,
@@ -61,6 +64,8 @@ export function AccountDock() {
   const [isConnectingReddit, setIsConnectingReddit] = useState(false);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [isConnectingSpotify, setIsConnectingSpotify] = useState(false);
+  const [selectedManualThemeIds, setSelectedManualThemeIds] = useState<string[]>([]);
+  const [isApplyingManual, setIsApplyingManual] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const supabase = getSupabaseBrowserClient();
@@ -80,8 +85,18 @@ export function AccountDock() {
     queryFn: getSpotifyTastePreview,
     enabled: isSignedIn && spotifyConnected,
   });
+  const themeCatalogQuery = useQuery({
+    queryKey: ["taste-themes"],
+    queryFn: getTasteThemes,
+  });
+  const manualPreviewQuery = useQuery({
+    queryKey: ["manual-taste-preview", ...selectedManualThemeIds],
+    queryFn: () => previewManualTaste(selectedManualThemeIds),
+    enabled: selectedManualThemeIds.length > 0,
+  });
   const spotifyThemes = spotifyPreviewQuery.data?.themes ?? [];
   const hasSpotifyThemes = spotifyThemes.length > 0;
+  const manualThemes = manualPreviewQuery.data?.themes ?? [];
   const spotifyLowSignalReason =
     typeof spotifyPreviewQuery.data?.unmatchedActivity?.reason === "string"
       ? spotifyPreviewQuery.data.unmatchedActivity.reason
@@ -146,6 +161,18 @@ export function AccountDock() {
         : "Unable to read a Spotify taste preview right now.",
     );
   }, [spotifyPreviewQuery.error]);
+
+  useEffect(() => {
+    if (!manualPreviewQuery.error) {
+      return;
+    }
+
+    setMessage(
+      manualPreviewQuery.error instanceof Error
+        ? manualPreviewQuery.error.message
+        : "Unable to preview the selected themes right now.",
+    );
+  }, [manualPreviewQuery.error]);
 
   const sendMagicLink = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -230,6 +257,129 @@ export function AccountDock() {
       setMessage(error instanceof Error ? error.message : "Unable to apply the Spotify taste profile.");
     }
   };
+
+  const toggleManualTheme = (themeId: string) => {
+    setSelectedManualThemeIds((current) =>
+      current.includes(themeId) ? current.filter((id) => id !== themeId) : [...current, themeId],
+    );
+  };
+
+  const applyManualProfile = async () => {
+    if (!selectedManualThemeIds.length) {
+      setMessage("Pick at least one theme to start a manual taste profile.");
+      return;
+    }
+
+    if (!isSignedIn) {
+      setShowSwitchForm(true);
+      setMessage("Sign in first, then Pulse can apply the themes you picked to your map.");
+      return;
+    }
+
+    setIsApplyingManual(true);
+    try {
+      await applyManualTaste(selectedManualThemeIds);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["auth-viewer"] }),
+        queryClient.invalidateQueries({ queryKey: ["interests"] }),
+        queryClient.invalidateQueries({ queryKey: ["map-recommendations"] }),
+        queryClient.invalidateQueries({ queryKey: ["archive"] }),
+        queryClient.invalidateQueries({ queryKey: ["manual-taste-preview"] }),
+      ]);
+      setMessage("Manual themes applied. Pulse just refreshed the map and interest signals from your picks.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to apply the manual taste profile.");
+    } finally {
+      setIsApplyingManual(false);
+    }
+  };
+
+  const manualSection = (
+    <div className="mt-4 rounded-[1.15rem] border border-stroke/80 bg-white/80 px-3 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <span className="inline-flex items-center gap-2 rounded-full border border-stroke bg-white px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Manual taste
+          </span>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Pick the scenes that sound like you. Pulse will treat them as emerging taste signals and shape the map from there.
+          </p>
+        </div>
+        {selectedManualThemeIds.length ? (
+          <button
+            type="button"
+            onClick={() => setSelectedManualThemeIds([])}
+            className="text-xs font-medium text-slate-500 transition hover:text-slate-900"
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {themeCatalogQuery.data?.items.map((theme) => {
+          const isSelected = selectedManualThemeIds.includes(theme.id);
+          return (
+            <button
+              key={theme.id}
+              type="button"
+              onClick={() => toggleManualTheme(theme.id)}
+              className={
+                isSelected
+                  ? "rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700"
+                  : "rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+              }
+            >
+              {theme.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedManualThemeIds.length ? (
+        <>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            {manualPreviewQuery.isLoading
+              ? "Previewing the themes you picked..."
+              : `Pulse can start from ${manualThemes.length} selected theme${manualThemes.length === 1 ? "" : "s"} right away.`}
+          </p>
+          {manualThemes.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {manualThemes.map((theme) => (
+                <span
+                  key={theme.id}
+                  className="rounded-full border border-stroke bg-white px-3 py-1.5 text-sm font-medium text-slate-700"
+                >
+                  {theme.label} · {theme.confidenceLabel}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void applyManualProfile()}
+            disabled={manualPreviewQuery.isLoading}
+            className="mt-4 inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+          >
+            {isSignedIn
+              ? isApplyingManual
+                ? "Applying themes..."
+                : "Use selected themes"
+              : "Sign in to use these themes"}
+          </button>
+          {!isSignedIn ? (
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              Your picks stay here while you sign in, then Pulse can apply them to the map.
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          Start with 2-4 themes if you want a broader culture profile before connecting more providers.
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <div className="relative z-[70] overflow-visible">
@@ -393,6 +543,8 @@ export function AccountDock() {
                 </div>
               ) : null}
 
+              {manualSection}
+
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke/80 pt-3">
                 {authMethod === "supabase" ? (
                   <button
@@ -457,6 +609,8 @@ export function AccountDock() {
               </button>
             </div>
           ) : null}
+
+          {!isSignedIn ? manualSection : null}
 
           <p className="mt-4 text-xs leading-5 text-slate-500">{message}</p>
         </div>

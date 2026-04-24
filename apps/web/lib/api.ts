@@ -9,6 +9,7 @@ import type {
   LocationAnchorPayload,
   RecommendationsMapResponse,
   SupplySyncResponse,
+  ThemeCatalogItem,
   TasteProfileResponse,
   UserConstraint
 } from "@/lib/types";
@@ -182,6 +183,24 @@ export function startMockRedditConnection() {
 export function startSpotifyConnection() {
   return request<{ authorizeUrl: string }>("/v1/spotify/connect/start", {
     method: "POST"
+  });
+}
+
+export function getTasteThemes() {
+  return request<{ items: ThemeCatalogItem[] }>("/v1/taste/themes");
+}
+
+export function previewManualTaste(selectedThemeIds: string[]) {
+  return request<TasteProfileResponse>("/v1/taste/manual/preview", {
+    method: "POST",
+    body: JSON.stringify({ selectedThemeIds })
+  });
+}
+
+export function applyManualTaste(selectedThemeIds: string[]) {
+  return request<TasteProfileResponse>("/v1/taste/manual/apply", {
+    method: "POST",
+    body: JSON.stringify({ selectedThemeIds })
   });
 }
 
