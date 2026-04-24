@@ -40,6 +40,10 @@ TOPIC_KEYWORD_MAP = {
     "indie_live_music": ["indie", "band", "concert", "live music", "show", "songwriter", "alt-pop"],
     "gallery_nights": ["gallery", "art", "opening", "installation", "visual"],
     "creative_meetups": ["meetup", "creative", "community", "networking"],
+    "collector_marketplaces": ["market", "popup", "fair", "vintage", "swap", "collector"],
+    "student_intellectual_scene": ["reading", "book", "lecture", "talk", "screening", "community"],
+    "ambitious_professional_scene": ["networking", "panel", "speaker", "founder", "industry", "cocktail"],
+    "style_design_shopping": ["design", "fashion", "vintage", "market", "popup", "boutique"],
 }
 
 
