@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -58,9 +59,20 @@ from app.taste.providers.spotify import SpotifyProvider
 router = APIRouter(prefix="/v1")
 
 
+def _resolve_web_app_url(settings, request: Request) -> str:
+    configured = urlsplit(settings.web_app_url)
+    request_host = request.url.hostname
+
+    if request_host in {"127.0.0.1", "localhost"} and configured.hostname in {"127.0.0.1", "localhost"}:
+        port = configured.port or 3000
+        return urlunsplit((configured.scheme or request.url.scheme, f"{request_host}:{port}", "", "", ""))
+
+    return settings.web_app_url
+
+
 async def current_identity(
-    session: AsyncSession = Depends(get_db),
     request: Request,
+    session: AsyncSession = Depends(get_db),
     authorization: Annotated[str | None, Header()] = None,
     x_pulse_user_email: Annotated[str | None, Header()] = None,
 ):
@@ -70,8 +82,8 @@ async def current_identity(
 
 
 async def authenticated_identity(
-    session: AsyncSession = Depends(get_db),
     request: Request,
+    session: AsyncSession = Depends(get_db),
     authorization: Annotated[str | None, Header()] = None,
     x_pulse_user_email: Annotated[str | None, Header()] = None,
 ):
@@ -157,6 +169,7 @@ async def reddit_connect_start(
 
 @router.get("/reddit/connect/callback")
 async def reddit_connect_callback(
+    request: Request,
     code: str | None = None,
     error: str | None = None,
     state: str | None = None,
@@ -225,7 +238,8 @@ async def reddit_connect_callback(
     connection.refresh_token_encrypted = token_payload.get("refresh_token")
     connection.scope_csv = token_payload.get("scope")
     await session.commit()
-    return RedirectResponse(f"{settings.web_app_url}/?reddit=connected", status_code=status.HTTP_302_FOUND)
+    web_app_url = _resolve_web_app_url(settings, request)
+    return RedirectResponse(f"{web_app_url}/?reddit=connected", status_code=status.HTTP_302_FOUND)
 
 
 @router.post("/spotify/connect/start", response_model=SpotifyConnectStartResponse)
@@ -253,6 +267,7 @@ async def spotify_connect_start(
 
 @router.get("/spotify/connect/callback")
 async def spotify_connect_callback(
+    request: Request,
     code: str | None = None,
     error: str | None = None,
     state: str | None = None,
@@ -317,7 +332,8 @@ async def spotify_connect_callback(
     connection.refresh_token_encrypted = token_payload.get("refresh_token") or connection.refresh_token_encrypted
     connection.scope_csv = token_payload.get("scope")
     await session.commit()
-    response = RedirectResponse(f"{settings.web_app_url}/?spotify=connected", status_code=status.HTTP_302_FOUND)
+    web_app_url = _resolve_web_app_url(settings, request)
+    response = RedirectResponse(f"{web_app_url}/?spotify=connected", status_code=status.HTTP_302_FOUND)
     set_pulse_session_cookie(response, user.id)
     return response
 

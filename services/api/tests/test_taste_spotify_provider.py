@@ -92,6 +92,65 @@ async def test_spotify_provider_builds_theme_profile_from_top_artists_and_tracks
 
 
 @pytest.mark.asyncio
+async def test_spotify_provider_accepts_broader_mainstream_genres() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/me":
+            return httpx.Response(200, json={"id": "spotify-user-4", "display_name": "Jordan"})
+        if request.url.path == "/v1/me/top/artists":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "name": "Skyline Pop",
+                            "genres": ["dance pop", "electropop", "metropopolis"],
+                            "popularity": 77,
+                        },
+                        {
+                            "name": "Room Show Kids",
+                            "genres": ["modern alternative pop", "indie pop"],
+                            "popularity": 69,
+                        },
+                        {
+                            "name": "Night Cipher",
+                            "genres": ["pop rap", "hip hop"],
+                            "popularity": 72,
+                        },
+                    ]
+                },
+            )
+        if request.url.path == "/v1/me/top/tracks":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {"name": "Night Drive", "artists": [{"name": "Skyline Pop"}]},
+                        {"name": "Live Session", "artists": [{"name": "Room Show Kids"}]},
+                    ]
+                },
+            )
+        if request.url.path == "/v1/me/player/recently-played":
+            return httpx.Response(
+                200,
+                json={"items": [{"track": {"name": "Summer Remix", "artists": [{"name": "Skyline Pop"}]}}]},
+            )
+        raise AssertionError(f"Unexpected URL {request.url}")
+
+    provider = SpotifyProvider(
+        settings=Settings(spotify_timeout_seconds=5.0),
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    connection = OAuthConnection(provider="spotify", access_token_encrypted="token")
+
+    profile = await provider.build_profile(FakeSession(), connection)
+
+    theme_ids = {theme.id for theme in profile.themes}
+    assert "rooftop_lounges" in theme_ids
+    assert "indie_live_music" in theme_ids
+    assert "hiphop_rap_shows" in theme_ids
+
+
+@pytest.mark.asyncio
 async def test_spotify_provider_raises_when_no_supported_signal_exists() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/me":

@@ -14,7 +14,22 @@ import type {
 } from "@/lib/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+function resolveApiUrl() {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "127.0.0.1" || host === "localhost") {
+      return `${window.location.protocol}//${host}:8000`;
+    }
+  }
+
+  return "http://localhost:8000";
+}
+
+const API_URL = resolveApiUrl();
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});

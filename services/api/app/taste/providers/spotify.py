@@ -37,13 +37,24 @@ SPOTIFY_THEME_RULES: tuple[SpotifyThemeRule, ...] = (
             "techno": 3,
             "house": 2,
             "electronic": 1,
+            "electronica": 2,
+            "dance": 1,
+            "edm": 2,
+            "deep house": 3,
+            "progressive house": 2,
+            "melodic house": 3,
+            "tech house": 3,
+            "minimal techno": 3,
             "uk garage": 3,
             "garage": 2,
+            "future garage": 3,
             "drum and bass": 3,
             "dnb": 3,
             "breakbeat": 2,
             "trance": 2,
             "dubstep": 2,
+            "future bass": 2,
+            "bass": 1,
         },
         track_keywords={"dj": 1, "mix": 1, "club": 1, "warehouse": 2, "after": 1},
         provider_note="Built from your top Spotify artists and recent club-leaning listening.",
@@ -54,11 +65,26 @@ SPOTIFY_THEME_RULES: tuple[SpotifyThemeRule, ...] = (
             "indie": 3,
             "alternative": 2,
             "alt": 1,
+            "rock": 1,
+            "alternative rock": 2,
+            "alternative pop": 2,
+            "modern alternative pop": 3,
+            "modern rock": 2,
+            "alt z": 2,
+            "indie pop": 3,
+            "indie poptimism": 2,
+            "pop rock": 2,
+            "folk": 1,
+            "folk-pop": 2,
             "shoegaze": 2,
             "dream pop": 2,
             "singer-songwriter": 2,
             "indie rock": 3,
             "bedroom pop": 2,
+            "chamber pop": 2,
+            "stomp and holler": 2,
+            "neo mellow": 2,
+            "art rock": 2,
         },
         track_keywords={"live": 1, "tour": 1, "band": 1, "session": 1},
         provider_note="Built from the indie and touring-band artists that dominate your Spotify rotation.",
@@ -70,7 +96,14 @@ SPOTIFY_THEME_RULES: tuple[SpotifyThemeRule, ...] = (
             "experimental": 2,
             "art pop": 3,
             "modern classical": 2,
+            "neo-classical": 2,
             "avant-garde": 3,
+            "trip hop": 2,
+            "downtempo": 2,
+            "indietronica": 2,
+            "chillwave": 2,
+            "lo-fi": 1,
+            "lo-fi beats": 2,
         },
         track_keywords={"installation": 2, "gallery": 2, "exhibit": 2},
         provider_note="Built from experimental and art-leaning artists in your recent listening.",
@@ -81,9 +114,14 @@ SPOTIFY_THEME_RULES: tuple[SpotifyThemeRule, ...] = (
             "jazz": 3,
             "bebop": 3,
             "neo soul": 2,
+            "neo-soul": 2,
             "soul jazz": 3,
             "vocal jazz": 3,
             "instrumental": 1,
+            "acoustic": 1,
+            "piano": 1,
+            "soul": 1,
+            "coffeehouse": 1,
         },
         track_keywords={"quartet": 2, "trio": 2, "live at": 1},
         provider_note="Built from jazz and intimate-session signals across your top artists and tracks.",
@@ -93,6 +131,7 @@ SPOTIFY_THEME_RULES: tuple[SpotifyThemeRule, ...] = (
         genre_keywords={
             "hip hop": 3,
             "rap": 3,
+            "pop rap": 2,
             "trap": 2,
             "drill": 3,
             "grime": 2,
@@ -110,6 +149,12 @@ SPOTIFY_THEME_RULES: tuple[SpotifyThemeRule, ...] = (
             "blues rock": 2,
             "indie folk": 2,
             "alt-country": 3,
+            "alternative country": 3,
+            "post-punk": 3,
+            "folk rock": 2,
+            "emo": 2,
+            "hardcore": 2,
+            "folk punk": 3,
         },
         track_keywords={"bar": 1, "whiskey": 1, "honky": 2},
         provider_note="Built from local-scene guitar music that usually maps to room-first nights out.",
@@ -118,11 +163,24 @@ SPOTIFY_THEME_RULES: tuple[SpotifyThemeRule, ...] = (
         theme_id="rooftop_lounges",
         genre_keywords={
             "dance pop": 2,
+            "pop": 1,
+            "electropop": 2,
+            "alt z": 1,
+            "latin pop": 2,
+            "latin": 1,
             "disco": 2,
             "funk": 2,
             "r&b": 2,
+            "rnb": 2,
+            "chill r&b": 2,
+            "urban contemporary": 2,
             "afrobeats": 2,
+            "afropop": 2,
+            "afroswing": 2,
+            "tropical house": 2,
             "nu-disco": 3,
+            "metropopolis": 2,
+            "escape room": 2,
         },
         track_keywords={"sunset": 1, "summer": 1, "night drive": 1, "remix": 1},
         provider_note="Built from polished dance-pop, disco, and lounge-adjacent listening patterns.",
@@ -332,15 +390,15 @@ class SpotifyProvider:
         themes: list[TasteTheme] = []
         for rule in SPOTIFY_THEME_RULES:
             total_points = points[rule.theme_id]
-            if total_points <= 2:
-                continue
-
-            confidence = min(89, max(28, round(total_points * 4.5)))
-            if confidence < 28:
+            if total_points < 1.4:
                 continue
 
             label = THEME_CATALOG_BY_ID[rule.theme_id].label
             examples = artist_examples[rule.theme_id] + track_examples[rule.theme_id]
+            if not examples:
+                continue
+
+            confidence = min(89, max(24, round(total_points * 4.5)))
             themes.append(
                 TasteTheme(
                     id=rule.theme_id,
