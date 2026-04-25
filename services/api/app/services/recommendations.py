@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -11,6 +13,9 @@ from app.models.user import User, UserAnchorLocation, UserConstraint
 from app.schemas.recommendations import (
     ArchiveResponse,
     ArchiveSnapshot,
+    RecommendationDebugSummary,
+    RecommendationDebugVenue,
+    RecommendationDriverSummary,
     MapVenuePin,
     MapContext,
     RecommendationsMapResponse,
@@ -901,6 +906,168 @@ def _unpack_reason_payload(
     return reasons, score_summary, score_breakdown
 
 
+def _constraints_snapshot(constraints: UserConstraint | None) -> dict:
+    if constraints is None:
+        return {
+            "city": SERVICE_AREA_NAME,
+            "neighborhood": None,
+            "zipCode": None,
+            "radiusMiles": 8,
+            "budgetLevel": "under_75",
+            "preferredDays": ["Thursday", "Friday", "Saturday"],
+            "socialMode": "either",
+        }
+
+    return {
+        "city": constraints.city,
+        "neighborhood": constraints.neighborhood,
+        "zipCode": constraints.zip_code,
+        "radiusMiles": constraints.radius_miles,
+        "budgetLevel": constraints.budget_level,
+        "preferredDays": constraints.preferred_days_csv.split(",") if constraints.preferred_days_csv else [],
+        "socialMode": constraints.social_mode,
+    }
+
+
+def _topic_labels(rows: list[UserInterestProfile], *, muted: bool) -> list[str]:
+    return [row.label for row in rows if row.muted is muted]
+
+
+def _topic_snapshot(rows: list[UserInterestProfile]) -> list[dict]:
+    return sorted(
+        [
+            {
+                "topicKey": row.topic_key,
+                "confidence": round(row.confidence, 3),
+                "boosted": row.boosted,
+                "muted": row.muted,
+            }
+            for row in rows
+        ],
+        key=lambda item: item["topicKey"],
+    )
+
+
+def _context_hash(
+    *,
+    run: RecommendationRun,
+    resolution: AnchorResolution,
+    constraints: UserConstraint | None,
+    topics: list[UserInterestProfile],
+    items: list[VenueRecommendationCard],
+) -> str:
+    active_anchor = resolution.active_anchor
+    requested_anchor = resolution.requested_anchor
+    payload = {
+        "runId": run.id,
+        "generatedAt": _timestamp_utc(run.created_at).isoformat(),
+        "serviceArea": SERVICE_AREA_NAME,
+        "activeAnchor": {
+            "label": _anchor_label(active_anchor),
+            "source": active_anchor.source if active_anchor else "default",
+            "latitude": active_anchor.latitude if active_anchor else None,
+            "longitude": active_anchor.longitude if active_anchor else None,
+            "zipCode": active_anchor.zip_code if active_anchor else None,
+            "neighborhood": active_anchor.neighborhood if active_anchor else None,
+        },
+        "requestedAnchor": {
+            "label": _anchor_label(requested_anchor) if requested_anchor else None,
+            "source": requested_anchor.source if requested_anchor else None,
+            "withinServiceArea": resolution.requested_within_service_area,
+            "usedFallback": resolution.used_fallback_anchor,
+        },
+        "constraints": _constraints_snapshot(constraints),
+        "topics": _topic_snapshot(topics),
+        "shortlist": [
+            {
+                "venueId": item.venueId,
+                "eventId": item.eventId,
+                "score": round(item.score, 3),
+                "scoreBand": item.scoreBand,
+            }
+            for item in items
+        ],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def _driver_summaries(
+    items: list[VenueRecommendationCard],
+) -> tuple[list[RecommendationDriverSummary], list[RecommendationDriverSummary]]:
+    buckets: dict[str, dict] = {}
+    for item in items:
+        for factor in item.scoreBreakdown:
+            bucket = buckets.setdefault(
+                factor.key,
+                {
+                    "key": factor.key,
+                    "label": factor.label,
+                    "contributionSum": 0.0,
+                    "count": 0,
+                    "venues": [],
+                },
+            )
+            bucket["contributionSum"] += factor.contribution
+            bucket["count"] += 1
+            bucket["venues"].append((abs(factor.contribution), item.venueName))
+
+    summaries: list[RecommendationDriverSummary] = []
+    for bucket in buckets.values():
+        average_contribution = round(bucket["contributionSum"] / max(1, bucket["count"]), 3)
+        unique_top_venues: list[str] = []
+        for _, venue_name in sorted(bucket["venues"], key=lambda item: item[0], reverse=True):
+            if venue_name in unique_top_venues:
+                continue
+            unique_top_venues.append(venue_name)
+            if len(unique_top_venues) == 3:
+                break
+
+        summaries.append(
+            RecommendationDriverSummary(
+                key=bucket["key"],
+                label=bucket["label"],
+                impactLabel=_impact_label(average_contribution),
+                averageContribution=average_contribution,
+                venueCount=bucket["count"],
+                topVenues=unique_top_venues,
+            )
+        )
+
+    positive = sorted(
+        [summary for summary in summaries if summary.averageContribution > 0.02],
+        key=lambda summary: summary.averageContribution,
+        reverse=True,
+    )
+    negative = sorted(
+        [summary for summary in summaries if summary.averageContribution < -0.02],
+        key=lambda summary: summary.averageContribution,
+    )
+    return positive[:4], negative[:4]
+
+
+def _debug_summary_sentence(
+    positive: list[RecommendationDriverSummary],
+    negative: list[RecommendationDriverSummary],
+) -> str | None:
+    if not positive and not negative:
+        return None
+    if positive and negative:
+        secondary_label = positive[1].label.lower() if len(positive) > 1 else positive[0].label.lower()
+        return (
+            f"This run is mostly driven by {positive[0].label.lower()} and {secondary_label}, "
+            f"with {negative[0].label.lower()} creating the main drag."
+        )
+    if positive:
+        lead = positive[0]
+        if len(positive) > 1:
+            return f"This run is mostly driven by {lead.label.lower()} and {positive[1].label.lower()}."
+        return f"This run is mostly driven by {lead.label.lower()}."
+    lead_drag = negative[0]
+    return f"This run is mostly being held back by {lead_drag.label.lower()}."
+
+
 def _normalize_text(value: str | None) -> str:
     return (value or "").strip().lower()
 
@@ -1459,6 +1626,61 @@ async def get_map_recommendations(
             "socialMode": constraints.social_mode if constraints else "either",
         },
         mapContext=_build_map_context(anchor_resolution),
+    )
+
+
+async def get_recommendation_debug_summary(
+    session: AsyncSession,
+    user: User,
+) -> RecommendationDebugSummary:
+    run = await refresh_recommendations_for_user(session, user)
+    if run is None:
+        return RecommendationDebugSummary()
+
+    anchor_resolution = await _user_anchor_resolution(session, user.id)
+    constraints = await _user_constraints(session, user.id)
+    topic_rows = list(
+        (
+            await session.scalars(
+                select(UserInterestProfile)
+                .where(UserInterestProfile.user_id == user.id)
+                .order_by(UserInterestProfile.confidence.desc(), UserInterestProfile.topic_key.asc())
+            )
+        ).all()
+    )
+    _, items, _ = await _cards_for_run(session, run)
+    positive_drivers, negative_drivers = _driver_summaries(items)
+
+    return RecommendationDebugSummary(
+        runId=run.id,
+        generatedAt=_timestamp_utc(run.created_at).isoformat(),
+        rankingModel=run.model_name,
+        contextHash=_context_hash(
+            run=run,
+            resolution=anchor_resolution,
+            constraints=constraints,
+            topics=topic_rows,
+            items=items,
+        ),
+        shortlistSize=len(items),
+        summary=_debug_summary_sentence(positive_drivers, negative_drivers),
+        mapContext=_build_map_context(anchor_resolution),
+        activeTopics=_topic_labels(topic_rows, muted=False),
+        mutedTopics=_topic_labels(topic_rows, muted=True),
+        topPositiveDrivers=positive_drivers,
+        topNegativeDrivers=negative_drivers,
+        venues=[
+            RecommendationDebugVenue(
+                rank=index + 1,
+                venueId=item.venueId,
+                venueName=item.venueName,
+                score=item.score,
+                scoreBand=item.scoreBand,
+                scoreSummary=item.scoreSummary,
+                topDrivers=item.scoreBreakdown[:3],
+            )
+            for index, item in enumerate(items)
+        ],
     )
 
 

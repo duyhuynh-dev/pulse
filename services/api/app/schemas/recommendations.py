@@ -99,6 +99,40 @@ class RecommendationsMapResponse(BaseModel):
     mapContext: MapContext = Field(default_factory=MapContext)
 
 
+class RecommendationDriverSummary(BaseModel):
+    key: str
+    label: str
+    impactLabel: str
+    averageContribution: float
+    venueCount: int
+    topVenues: list[str] = Field(default_factory=list)
+
+
+class RecommendationDebugVenue(BaseModel):
+    rank: int
+    venueId: str
+    venueName: str
+    score: float
+    scoreBand: str
+    scoreSummary: str | None = None
+    topDrivers: list[RecommendationScoreBreakdownItem] = Field(default_factory=list)
+
+
+class RecommendationDebugSummary(BaseModel):
+    runId: str | None = None
+    generatedAt: str | None = None
+    rankingModel: str | None = None
+    contextHash: str | None = None
+    shortlistSize: int = 0
+    summary: str | None = None
+    mapContext: MapContext = Field(default_factory=MapContext)
+    activeTopics: list[str] = Field(default_factory=list)
+    mutedTopics: list[str] = Field(default_factory=list)
+    topPositiveDrivers: list[RecommendationDriverSummary] = Field(default_factory=list)
+    topNegativeDrivers: list[RecommendationDriverSummary] = Field(default_factory=list)
+    venues: list[RecommendationDebugVenue] = Field(default_factory=list)
+
+
 class ArchiveSnapshot(BaseModel):
     runId: str
     kind: str

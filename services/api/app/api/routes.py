@@ -26,7 +26,12 @@ from app.schemas.profile import (
     InterestListUpdate,
     UserConstraintPayload,
 )
-from app.schemas.recommendations import ArchiveResponse, FeedbackPayload, RecommendationsMapResponse
+from app.schemas.recommendations import (
+    ArchiveResponse,
+    FeedbackPayload,
+    RecommendationDebugSummary,
+    RecommendationsMapResponse,
+)
 from app.schemas.taste import (
     ManualTastePayload,
     TasteProfileResponse,
@@ -46,7 +51,12 @@ from app.services.auth import (
 from app.services.digest import build_digest_preview, send_digest_preview, send_due_weekly_digests
 from app.services.ingestion import upsert_ingested_candidates
 from app.services.profile import get_email_preferences, list_interests, update_email_preferences, update_interests
-from app.services.recommendations import get_archive, get_map_recommendations, refresh_recommendations_for_user
+from app.services.recommendations import (
+    get_archive,
+    get_map_recommendations,
+    get_recommendation_debug_summary,
+    refresh_recommendations_for_user,
+)
 from app.services.recommendations import _build_map_context, _user_anchor_resolution
 from app.services.reddit_oauth import build_reddit_authorize_url
 from app.services.seed import bootstrap_user_with_mock_reddit
@@ -446,6 +456,14 @@ async def recommendations_map(
     user=Depends(current_user),
 ) -> RecommendationsMapResponse:
     return await get_map_recommendations(session, user)
+
+
+@router.get("/recommendations/debug-summary", response_model=RecommendationDebugSummary)
+async def recommendations_debug_summary(
+    session: AsyncSession = Depends(get_db),
+    user=Depends(current_user),
+) -> RecommendationDebugSummary:
+    return await get_recommendation_debug_summary(session, user)
 
 
 @router.post("/recommendations/refresh", response_model=OkResponse)

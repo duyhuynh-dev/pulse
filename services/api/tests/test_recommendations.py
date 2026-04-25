@@ -1,5 +1,19 @@
+from datetime import UTC, datetime
+
+from app.models.recommendation import RecommendationRun
+from app.models.user import UserAnchorLocation, UserConstraint
+from app.schemas.recommendations import (
+    RecommendationFreshness,
+    RecommendationProvenance,
+    RecommendationScoreBreakdownItem,
+    TravelEstimate,
+    VenueRecommendationCard,
+)
 from app.services.recommendations import (
+    AnchorResolution,
     CandidateScoreComponents,
+    _context_hash,
+    _driver_summaries,
     _pack_reason_payload,
     _score_breakdown_items,
     _score_summary,
@@ -67,3 +81,177 @@ def test_pack_and_unpack_reason_payload_preserves_explainability_metadata() -> N
     assert score_summary == "Led by profile fit."
     assert unpacked_breakdown[0].key == "profile_fit"
     assert unpacked_breakdown[0].impactLabel == "driving this pick"
+
+
+def _sample_card(
+    *,
+    venue_id: str,
+    venue_name: str,
+    score: float,
+    score_band: str,
+    score_summary: str,
+    score_breakdown: list[RecommendationScoreBreakdownItem],
+) -> VenueRecommendationCard:
+    return VenueRecommendationCard(
+        venueId=venue_id,
+        venueName=venue_name,
+        neighborhood="East Village",
+        address="123 Example St",
+        eventTitle="Sample Event",
+        eventId=f"{venue_id}-event",
+        startsAt="2026-04-24T20:00:00+00:00",
+        priceLabel="$25",
+        scoreBand=score_band,
+        score=score,
+        travel=[TravelEstimate(mode="transit", label="18 min transit", minutes=18)],
+        reasons=[],
+        freshness=RecommendationFreshness(
+            discoveredAt="2026-04-23T20:00:00+00:00",
+            lastVerifiedAt="2026-04-24T18:00:00+00:00",
+            freshnessLabel="Checked today",
+        ),
+        provenance=RecommendationProvenance(
+            sourceName="Curated venue calendars",
+            sourceKind="curated_calendar",
+            sourceConfidence=0.88,
+            sourceConfidenceLabel="High trust",
+            sourceBaseUrl="https://example.com",
+            hasTicketUrl=True,
+        ),
+        scoreSummary=score_summary,
+        scoreBreakdown=score_breakdown,
+        secondaryEvents=[],
+    )
+
+
+def test_driver_summaries_split_positive_and_negative_signals() -> None:
+    cards = [
+        _sample_card(
+            venue_id="venue-1",
+            venue_name="Public Records",
+            score=0.92,
+            score_band="high",
+            score_summary="Led by profile fit and travel convenience.",
+            score_breakdown=[
+                RecommendationScoreBreakdownItem(
+                    key="profile_fit",
+                    label="Profile fit",
+                    impactLabel="driving this pick",
+                    detail="Matched Underground dance.",
+                    contribution=0.44,
+                    direction="positive",
+                ),
+                RecommendationScoreBreakdownItem(
+                    key="feedback",
+                    label="Recent feedback",
+                    impactLabel="holding it back",
+                    detail="You recently dismissed similar club-heavy picks.",
+                    contribution=-0.08,
+                    direction="negative",
+                ),
+            ],
+        ),
+        _sample_card(
+            venue_id="venue-2",
+            venue_name="Elsewhere",
+            score=0.87,
+            score_band="high",
+            score_summary="Led by profile fit and source trust.",
+            score_breakdown=[
+                RecommendationScoreBreakdownItem(
+                    key="profile_fit",
+                    label="Profile fit",
+                    impactLabel="strong support",
+                    detail="Matched Underground dance.",
+                    contribution=0.39,
+                    direction="positive",
+                ),
+                RecommendationScoreBreakdownItem(
+                    key="source_trust",
+                    label="Source trust",
+                    impactLabel="helping",
+                    detail="Backed by a highly trusted source.",
+                    contribution=0.05,
+                    direction="positive",
+                ),
+            ],
+        ),
+    ]
+
+    positive, negative = _driver_summaries(cards)
+
+    assert positive[0].key == "profile_fit"
+    assert "Public Records" in positive[0].topVenues
+    assert negative[0].key == "feedback"
+    assert negative[0].averageContribution < 0
+
+
+def test_context_hash_changes_when_shortlist_changes() -> None:
+    run = RecommendationRun(
+        id="run-1",
+        user_id="user-1",
+        provider="catalog",
+        model_name="pulse-deterministic-v1",
+        viewport_json={},
+        created_at=datetime(2026, 4, 24, 18, 0, tzinfo=UTC),
+    )
+    active_anchor = UserAnchorLocation(
+        user_id="user-1",
+        source="neighborhood",
+        neighborhood="East Village",
+        latitude=40.7265,
+        longitude=-73.9815,
+    )
+    constraints = UserConstraint(
+        user_id="user-1",
+        city="New York City",
+        neighborhood="East Village",
+        zip_code="10003",
+        radius_miles=8,
+        budget_level="under_75",
+        preferred_days_csv="Thursday,Friday,Saturday",
+        social_mode="either",
+    )
+    resolution = AnchorResolution(
+        requested_anchor=active_anchor,
+        active_anchor=active_anchor,
+        requested_within_service_area=True,
+        used_fallback_anchor=False,
+    )
+    topics = []
+    shortlist = [
+        _sample_card(
+            venue_id="venue-1",
+            venue_name="Public Records",
+            score=0.92,
+            score_band="high",
+            score_summary="Led by profile fit.",
+            score_breakdown=[],
+        )
+    ]
+
+    first_hash = _context_hash(
+        run=run,
+        resolution=resolution,
+        constraints=constraints,
+        topics=topics,
+        items=shortlist,
+    )
+    second_hash = _context_hash(
+        run=run,
+        resolution=resolution,
+        constraints=constraints,
+        topics=topics,
+        items=[
+            _sample_card(
+                venue_id="venue-2",
+                venue_name="Elsewhere",
+                score=0.88,
+                score_band="high",
+                score_summary="Led by travel fit.",
+                score_breakdown=[],
+            )
+        ],
+    )
+
+    assert first_hash != second_hash
