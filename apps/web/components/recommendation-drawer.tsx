@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Bookmark, MapPin, MoveRight, XCircle } from "lucide-react";
-import type { VenueRecommendationCard } from "@/lib/types";
+import type { RecommendationRunComparisonItem, VenueRecommendationCard } from "@/lib/types";
 import { formatEventStart, formatRelativeTimestamp } from "@/lib/utils";
 
 export function RecommendationDrawer({
@@ -13,6 +13,7 @@ export function RecommendationDrawer({
   onSelectVenue,
   onSave,
   onDismiss,
+  comparisonByVenueId = {},
   mode = "rail",
   previewCount = 2,
   isExpanded = false,
@@ -25,6 +26,7 @@ export function RecommendationDrawer({
   onSelectVenue: (venueId: string) => void;
   onSave: (card: VenueRecommendationCard) => void;
   onDismiss: (card: VenueRecommendationCard) => void;
+  comparisonByVenueId?: Record<string, RecommendationRunComparisonItem>;
   mode?: "rail" | "modal";
   previewCount?: number;
   isExpanded?: boolean;
@@ -86,6 +88,16 @@ export function RecommendationDrawer({
 
         {visibleCards.map((card) => {
           const selected = card.venueId === selectedVenueId;
+          const comparison = comparisonByVenueId[card.venueId];
+          const movementCues = comparison?.movementCues ?? [];
+          const movementLabel =
+            comparison?.movement === "new"
+              ? "New"
+              : comparison?.movement === "up"
+                ? `Up ${Math.abs(comparison.rankDelta ?? 0)}`
+                : comparison?.movement === "down"
+                  ? `Down ${Math.abs(comparison.rankDelta ?? 0)}`
+                  : null;
 
           return (
             <article
@@ -142,6 +154,37 @@ export function RecommendationDrawer({
 
               {card.scoreSummary ? (
                 <p className="mt-4 text-sm leading-6 text-slate-700">{card.scoreSummary}</p>
+              ) : null}
+
+              {movementLabel || movementCues.length ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
+                  {movementLabel ? (
+                    <span
+                      className={[
+                        "rounded-full border px-3 py-1",
+                        comparison?.movement === "down"
+                          ? "border-amber-200 bg-amber-50 text-amber-800"
+                          : "border-sky-200 bg-sky-50 text-sky-800"
+                      ].join(" ")}
+                    >
+                      {movementLabel}
+                    </span>
+                  ) : null}
+                  {movementCues.slice(0, mode === "rail" ? 2 : 3).map((cue) => (
+                    <span
+                      key={`${card.venueId}-movement-${cue.key}`}
+                      className={[
+                        "rounded-full border px-3 py-1",
+                        cue.direction === "negative"
+                          ? "border-amber-200 bg-amber-50 text-amber-800"
+                          : "border-sky-200 bg-sky-50 text-sky-800"
+                      ].join(" ")}
+                      title={`Contribution delta ${cue.delta > 0 ? "+" : ""}${cue.delta.toFixed(3)}`}
+                    >
+                      {cue.label} {cue.direction === "positive" ? "\u2191" : "\u2193"}
+                    </span>
+                  ))}
+                </div>
               ) : null}
 
               {card.scoreBreakdown.length ? (

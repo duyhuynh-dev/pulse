@@ -9,12 +9,13 @@ import {
   getEmailPreferences,
   getInterests,
   getMapRecommendations,
+  getRecommendationRunComparison,
   patchInterests,
   refreshRecommendations,
   syncSupply,
   submitFeedback
 } from "@/lib/api";
-import type { FeedbackReason, InterestTopic, VenueRecommendationCard } from "@/lib/types";
+import type { FeedbackReason, InterestTopic, RecommendationRunComparisonItem, VenueRecommendationCard } from "@/lib/types";
 import { useAuth } from "@/components/auth-provider";
 import { AccountDock } from "@/components/account-dock";
 import { FeedbackReasonModal } from "@/components/feedback-reason-modal";
@@ -52,6 +53,10 @@ export function PulseShell() {
   const mapQuery = useQuery({
     queryKey: ["map-recommendations", identityKey],
     queryFn: getMapRecommendations
+  });
+  const comparisonQuery = useQuery({
+    queryKey: ["recommendation-run-comparison", identityKey],
+    queryFn: getRecommendationRunComparison,
   });
 
   const interestsQuery = useQuery({
@@ -179,6 +184,14 @@ export function PulseShell() {
     surfaceStatus ??
     mapQuery.data?.mapContext?.fallbackReason ??
     (!isAuthenticated ? "Open Profile to sign in, save this map, and keep setup tucked behind Settings." : null);
+  const comparisonByVenueId: Record<string, RecommendationRunComparisonItem> = {};
+  for (const item of [
+    ...(comparisonQuery.data?.newEntrants ?? []),
+    ...(comparisonQuery.data?.movers ?? []),
+    ...(comparisonQuery.data?.steadyLeaders ?? []),
+  ]) {
+    comparisonByVenueId[item.venueId] = item;
+  }
   const toggleRailModal = (target: "signals" | "spots") => {
     setActiveRailModal((current) => (current === target ? null : target));
   };
@@ -304,6 +317,7 @@ export function PulseShell() {
               isExpanded={activeRailModal === "spots"}
               onToggleExpanded={() => toggleRailModal("spots")}
               onSelectVenue={setSelectedVenueId}
+              comparisonByVenueId={comparisonByVenueId}
               onSave={(card) => queueFeedback(card, "save")}
               onDismiss={(card) => queueFeedback(card, "dismiss")}
             />
@@ -343,6 +357,7 @@ export function PulseShell() {
           timezone={mapQuery.data?.displayTimezone ?? "America/New_York"}
           selectedVenueId={selectedVenueId}
           onSelectVenue={setSelectedVenueId}
+          comparisonByVenueId={comparisonByVenueId}
           onSave={(card) => queueFeedback(card, "save")}
           onDismiss={(card) => queueFeedback(card, "dismiss")}
         />
