@@ -103,9 +103,13 @@ class FeedbackSignals:
     saved_venues: dict[str, float] = field(default_factory=dict)
     dismissed_venues: dict[str, float] = field(default_factory=dict)
     confirmed_saved_venues: dict[str, float] = field(default_factory=dict)
+    opened_venues: dict[str, float] = field(default_factory=dict)
+    exposed_venues: dict[str, float] = field(default_factory=dict)
     saved_topics: dict[str, float] = field(default_factory=dict)
     dismissed_topics: dict[str, float] = field(default_factory=dict)
     confirmed_saved_topics: dict[str, float] = field(default_factory=dict)
+    opened_topics: dict[str, float] = field(default_factory=dict)
+    exposed_topics: dict[str, float] = field(default_factory=dict)
     saved_neighborhoods: dict[str, float] = field(default_factory=dict)
     dismissed_neighborhoods: dict[str, float] = field(default_factory=dict)
     saved_reasons: dict[str, float] = field(default_factory=dict)
@@ -304,25 +308,39 @@ async def _feedback_signals(session: AsyncSession, user_id: str) -> FeedbackSign
             _derive_topic_keys(event, metadata.get("tags", [])) if event is not None else []
         )
 
-        venue_store = signals.saved_venues if row.action == "save" else signals.dismissed_venues
-        topic_store = signals.saved_topics if row.action == "save" else signals.dismissed_topics
-        neighborhood_store = signals.saved_neighborhoods if row.action == "save" else signals.dismissed_neighborhoods
+        if row.action in {"save", "dismiss"}:
+            venue_store = signals.saved_venues if row.action == "save" else signals.dismissed_venues
+            topic_store = signals.saved_topics if row.action == "save" else signals.dismissed_topics
+            neighborhood_store = (
+                signals.saved_neighborhoods if row.action == "save" else signals.dismissed_neighborhoods
+            )
 
-        if venue is not None:
-            _add_feedback_weight(venue_store, venue.id, weight)
-            _add_feedback_weight(neighborhood_store, venue.neighborhood, weight)
+            if venue is not None:
+                _add_feedback_weight(venue_store, venue.id, weight)
+                _add_feedback_weight(neighborhood_store, venue.neighborhood, weight)
 
-        for topic_key in topic_keys:
-            _add_feedback_weight(topic_store, topic_key, weight)
+            for topic_key in topic_keys:
+                _add_feedback_weight(topic_store, topic_key, weight)
 
-        reason_store = signals.saved_reasons if row.action == "save" else signals.dismissed_reasons
-        reason_count_store = (
-            signals.saved_reason_counts if row.action == "save" else signals.dismissed_reason_counts
-        )
-        for reason_key, reason_label in _feedback_reason_entries(row.reasons_json):
-            _add_feedback_weight(reason_store, reason_key, weight)
-            _increment_feedback_count(reason_count_store, reason_key)
-            signals.reason_labels[reason_key] = reason_label
+            reason_store = signals.saved_reasons if row.action == "save" else signals.dismissed_reasons
+            reason_count_store = (
+                signals.saved_reason_counts if row.action == "save" else signals.dismissed_reason_counts
+            )
+            for reason_key, reason_label in _feedback_reason_entries(row.reasons_json):
+                _add_feedback_weight(reason_store, reason_key, weight)
+                _increment_feedback_count(reason_count_store, reason_key)
+                signals.reason_labels[reason_key] = reason_label
+
+        if row.action in {"opened", "exposed"}:
+            interaction_weight = _interaction_signal_weight(row.action, created_at=row.created_at)
+            venue_store = signals.opened_venues if row.action == "opened" else signals.exposed_venues
+            topic_store = signals.opened_topics if row.action == "opened" else signals.exposed_topics
+
+            if venue is not None:
+                _add_feedback_weight(venue_store, venue.id, interaction_weight)
+
+            for topic_key in topic_keys:
+                _add_feedback_weight(topic_store, topic_key, interaction_weight)
 
         if row.action != "save":
             continue
@@ -522,6 +540,15 @@ def _confirmed_save_outcome_weight(*, created_at: datetime, future_runs: list[di
         weight += 0.24
 
     return min(1.04, weight)
+
+
+def _interaction_signal_weight(action: str, *, created_at: datetime) -> float:
+    base_weight = 0.0
+    if action == "opened":
+        base_weight = 0.65
+    elif action == "exposed":
+        base_weight = 0.32
+    return round(base_weight * _feedback_recency_weight(created_at), 3)
 
 
 def _add_feedback_weight(store: dict[str, float], key: str | None, weight: float) -> None:
@@ -843,9 +870,13 @@ def _feedback_adjustment(
     saved_venue_weight = feedback_signals.saved_venues.get(_normalize_text(venue.id), 0.0)
     dismissed_venue_weight = feedback_signals.dismissed_venues.get(_normalize_text(venue.id), 0.0)
     confirmed_saved_venue_weight = feedback_signals.confirmed_saved_venues.get(_normalize_text(venue.id), 0.0)
+    opened_venue_weight = feedback_signals.opened_venues.get(_normalize_text(venue.id), 0.0)
+    exposed_venue_weight = feedback_signals.exposed_venues.get(_normalize_text(venue.id), 0.0)
     saved_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.saved_topics)
     dismissed_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.dismissed_topics)
     confirmed_saved_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.confirmed_saved_topics)
+    opened_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.opened_topics)
+    exposed_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.exposed_topics)
     neighborhood_key = _normalize_text(venue.neighborhood)
     neighborhood_delta = (
         feedback_signals.saved_neighborhoods.get(neighborhood_key, 0.0)
@@ -858,11 +889,30 @@ def _feedback_adjustment(
         adjustment -= min(0.34, 0.18 + (dismissed_venue_weight * 0.08))
     if confirmed_saved_venue_weight:
         adjustment += min(0.10, 0.03 + (confirmed_saved_venue_weight * 0.04))
+    if opened_venue_weight:
+        adjustment += min(0.09, 0.02 + (opened_venue_weight * 0.045))
 
     topic_delta = saved_topic_weight - dismissed_topic_weight
     adjustment += max(-0.12, min(0.12, topic_delta * 0.10))
     adjustment += max(0.0, min(0.08, confirmed_saved_topic_weight * 0.05))
+    adjustment += max(0.0, min(0.06, opened_topic_weight * 0.035))
     adjustment += max(-0.06, min(0.06, neighborhood_delta * 0.04))
+
+    exposure_drag = max(
+        0.0,
+        exposed_venue_weight
+        - (opened_venue_weight * 0.9)
+        - (saved_venue_weight * 0.75)
+        - (confirmed_saved_venue_weight * 0.6),
+    )
+    topic_exposure_drag = max(
+        0.0,
+        exposed_topic_weight
+        - (opened_topic_weight * 0.9)
+        - (saved_topic_weight * 0.6)
+        - (confirmed_saved_topic_weight * 0.5),
+    )
+    adjustment -= min(0.055, (exposure_drag * 0.025) + (topic_exposure_drag * 0.015))
 
     feedback_reason: dict | None = None
     topic_labels = _feedback_topic_labels(topic_keys, profiles_by_key)
@@ -871,6 +921,11 @@ def _feedback_adjustment(
         feedback_reason = {
             "title": "Validated save",
             "detail": f"You saved {venue.name} and it kept surviving later runs, so Pulse now trusts that signal more.",
+        }
+    elif opened_venue_weight >= 0.4:
+        feedback_reason = {
+            "title": "Reopened before",
+            "detail": f"You keep revisiting {venue.name}, so Pulse treats it as a stronger active interest.",
         }
     elif dismissed_venue_weight >= 0.45:
         feedback_reason = {
@@ -892,10 +947,20 @@ def _feedback_adjustment(
             "title": "Validated pattern",
             "detail": f"Saved {_join_labels(topic_labels)} picks kept showing up in later runs, so this signal now gets more trust.",
         }
+    elif opened_topic_weight >= 0.35 and topic_labels:
+        feedback_reason = {
+            "title": "Return pattern",
+            "detail": f"You keep reopening {_join_labels(topic_labels)} picks, so Pulse treats that theme as more active right now.",
+        }
     elif topic_delta >= 0.35 and topic_labels:
         feedback_reason = {
             "title": "Save pattern",
             "detail": f"You tend to save {_join_labels(topic_labels)} picks, so this gets a small lift.",
+        }
+    elif (exposure_drag >= 0.7 or topic_exposure_drag >= 0.7) and topic_labels:
+        feedback_reason = {
+            "title": "Seen, not opened",
+            "detail": f"Pulse has shown you a few {_join_labels(topic_labels)} picks that you did not reopen, so this gets a softer rank.",
         }
     elif neighborhood_delta <= -0.6 and venue.neighborhood:
         feedback_reason = {
@@ -1153,6 +1218,10 @@ def _score_breakdown_items(
         feedback_title = feedback_reason.get("title") if feedback_reason is not None else ""
         if feedback_adjustment >= 0 and isinstance(feedback_title, str) and feedback_title.startswith("Validated"):
             summary_label = "validated saves"
+        elif feedback_adjustment >= 0 and feedback_title in {"Reopened before", "Return pattern"}:
+            summary_label = "repeat opens"
+        elif feedback_adjustment < 0 and feedback_title == "Seen, not opened":
+            summary_label = "stale exposure"
         else:
             summary_label = "recent feedback" if feedback_adjustment >= 0 else "recent dismiss patterns"
         items.append(

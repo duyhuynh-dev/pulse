@@ -200,6 +200,15 @@ export function submitFeedback(
   });
 }
 
+export function submitRecommendationInteractions(
+  events: Array<{ recommendationId: string; action: "exposed" | "opened" }>,
+) {
+  return request<{ ok: true }>("/v1/recommendations/interactions", {
+    method: "POST",
+    body: JSON.stringify({ events }),
+  });
+}
+
 export function getMapToken() {
   return request<{ enabled: boolean; token: string | null }>("/v1/maps/token");
 }

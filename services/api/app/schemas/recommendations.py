@@ -205,3 +205,12 @@ class FeedbackReason(BaseModel):
 class FeedbackPayload(BaseModel):
     action: str
     reasons: list[FeedbackReason] = Field(default_factory=list)
+
+
+class RecommendationInteractionEvent(BaseModel):
+    recommendationId: str
+    action: str
+
+
+class RecommendationInteractionsPayload(BaseModel):
+    events: list[RecommendationInteractionEvent] = Field(default_factory=list)

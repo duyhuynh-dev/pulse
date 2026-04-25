@@ -11,6 +11,7 @@ export function RecommendationDrawer({
   timezone,
   selectedVenueId,
   onSelectVenue,
+  onExposeCards,
   onSave,
   onDismiss,
   comparisonByVenueId = {},
@@ -24,6 +25,7 @@ export function RecommendationDrawer({
   timezone: string;
   selectedVenueId: string | null;
   onSelectVenue: (venueId: string) => void;
+  onExposeCards?: (cards: VenueRecommendationCard[]) => void;
   onSave: (card: VenueRecommendationCard) => void;
   onDismiss: (card: VenueRecommendationCard) => void;
   comparisonByVenueId?: Record<string, RecommendationRunComparisonItem>;
@@ -37,6 +39,7 @@ export function RecommendationDrawer({
   const canShowAll = mode === "rail" && orderedCards.length > visibleCards.length;
   const breakdownPreviewCount = mode === "rail" ? 3 : 5;
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const visibleCardSignature = visibleCards.map((card) => card.eventId).join("|");
 
   useEffect(() => {
     if (!selectedVenueId) {
@@ -46,6 +49,13 @@ export function RecommendationDrawer({
     const target = cardRefs.current[selectedVenueId];
     target?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedVenueId]);
+
+  useEffect(() => {
+    if (loading || !onExposeCards || !visibleCards.length) {
+      return;
+    }
+    onExposeCards(visibleCards);
+  }, [loading, onExposeCards, visibleCardSignature]);
 
   return (
     <aside

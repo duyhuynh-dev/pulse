@@ -29,6 +29,7 @@ from app.schemas.profile import (
 from app.schemas.recommendations import (
     ArchiveResponse,
     FeedbackPayload,
+    RecommendationInteractionsPayload,
     RecommendationDebugSummary,
     RecommendationRunComparison,
     RecommendationsMapResponse,
@@ -565,6 +566,38 @@ async def recommendation_feedback(
     )
     await session.flush()
     await refresh_recommendations_for_user(session, user, force=True)
+    return OkResponse()
+
+
+@router.post("/recommendations/interactions", response_model=OkResponse)
+async def recommendation_interactions(
+    payload: RecommendationInteractionsPayload,
+    session: AsyncSession = Depends(get_db),
+    user=Depends(current_user),
+) -> OkResponse:
+    if user is None:
+        return OkResponse()
+
+    allowed_actions = {"exposed", "opened"}
+    seen: set[tuple[str, str]] = set()
+
+    for event in payload.events:
+        action = event.action.strip().lower()
+        recommendation_id = event.recommendationId.strip()
+        key = (recommendation_id, action)
+        if not recommendation_id or action not in allowed_actions or key in seen:
+            continue
+        seen.add(key)
+        session.add(
+            FeedbackEvent(
+                user_id=user.id,
+                recommendation_id=recommendation_id,
+                action=action,
+                reasons_json=[],
+            )
+        )
+
+    await session.flush()
     return OkResponse()
 
 

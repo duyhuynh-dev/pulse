@@ -480,6 +480,31 @@ async def test_feedback_signals_confirm_saved_reasons_from_reranks_and_sent_dige
             created_at=saved_at,
         )
         session.add(feedback)
+        session.add_all(
+            [
+                FeedbackEvent(
+                    user_id=user.id,
+                    recommendation_id=occurrence.id,
+                    action="exposed",
+                    reasons_json=[],
+                    created_at=saved_at + timedelta(hours=1),
+                ),
+                FeedbackEvent(
+                    user_id=user.id,
+                    recommendation_id=occurrence.id,
+                    action="opened",
+                    reasons_json=[],
+                    created_at=saved_at + timedelta(hours=2),
+                ),
+                FeedbackEvent(
+                    user_id=user.id,
+                    recommendation_id=occurrence.id,
+                    action="opened",
+                    reasons_json=[],
+                    created_at=saved_at + timedelta(hours=14),
+                ),
+            ]
+        )
         await session.flush()
 
         rerun_created_at = saved_at + timedelta(hours=12)
@@ -524,5 +549,8 @@ async def test_feedback_signals_confirm_saved_reasons_from_reranks_and_sent_dige
         assert signals.confirmed_saved_reason_counts["easy_to_get_to"] == 1
         assert signals.confirmed_saved_venues[venue.id] > 0
         assert signals.confirmed_saved_topics["underground_dance"] > 0
+        assert signals.exposed_venues[venue.id] > 0
+        assert signals.opened_venues[venue.id] > signals.exposed_venues[venue.id]
+        assert signals.opened_topics["underground_dance"] > 0
 
     await engine.dispose()

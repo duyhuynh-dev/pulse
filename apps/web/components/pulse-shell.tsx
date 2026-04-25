@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   sendDigestPreview,
@@ -12,6 +12,7 @@ import {
   getRecommendationRunComparison,
   patchInterests,
   refreshRecommendations,
+  submitRecommendationInteractions,
   syncSupply,
   submitFeedback
 } from "@/lib/api";
@@ -37,6 +38,8 @@ export function PulseShell() {
     action: "save" | "dismiss";
     venueName: string;
   } | null>(null);
+  const exposedRecommendationIdsRef = useRef<Set<string>>(new Set());
+  const lastOpenedRecommendationIdRef = useRef<string | null>(null);
   const identityKey = user?.id ?? "demo";
 
   const viewerQuery = useQuery({
@@ -202,6 +205,49 @@ export function PulseShell() {
       venueName: card.venueName,
     });
   };
+  const recordInteractions = (events: Array<{ recommendationId: string; action: "exposed" | "opened" }>) => {
+    if (!events.length) {
+      return;
+    }
+    void submitRecommendationInteractions(events).catch(() => {
+      // Interaction logging is opportunistic; ranking should keep working even if this fails.
+    });
+  };
+  const handleExposeCards = (cards: VenueRecommendationCard[]) => {
+    const freshEvents = cards
+      .filter((card) => {
+        if (exposedRecommendationIdsRef.current.has(card.eventId)) {
+          return false;
+        }
+        exposedRecommendationIdsRef.current.add(card.eventId);
+        return true;
+      })
+      .map((card) => ({ recommendationId: card.eventId, action: "exposed" as const }));
+
+    recordInteractions(freshEvents);
+  };
+
+  useEffect(() => {
+    exposedRecommendationIdsRef.current.clear();
+    lastOpenedRecommendationIdRef.current = null;
+  }, [identityKey, mapQuery.data?.generatedAt]);
+
+  useEffect(() => {
+    if (!selectedVenueId) {
+      return;
+    }
+
+    const selectedCard = mapQuery.data?.cards?.[selectedVenueId];
+    if (!selectedCard) {
+      return;
+    }
+    if (lastOpenedRecommendationIdRef.current === selectedCard.eventId) {
+      return;
+    }
+
+    lastOpenedRecommendationIdRef.current = selectedCard.eventId;
+    recordInteractions([{ recommendationId: selectedCard.eventId, action: "opened" }]);
+  }, [selectedVenueId, mapQuery.data?.cards]);
 
   return (
     <main className="min-h-screen px-4 py-4 md:px-6 md:py-6">
@@ -317,6 +363,7 @@ export function PulseShell() {
               isExpanded={activeRailModal === "spots"}
               onToggleExpanded={() => toggleRailModal("spots")}
               onSelectVenue={setSelectedVenueId}
+              onExposeCards={handleExposeCards}
               comparisonByVenueId={comparisonByVenueId}
               onSave={(card) => queueFeedback(card, "save")}
               onDismiss={(card) => queueFeedback(card, "dismiss")}
@@ -357,6 +404,7 @@ export function PulseShell() {
           timezone={mapQuery.data?.displayTimezone ?? "America/New_York"}
           selectedVenueId={selectedVenueId}
           onSelectVenue={setSelectedVenueId}
+          onExposeCards={handleExposeCards}
           comparisonByVenueId={comparisonByVenueId}
           onSave={(card) => queueFeedback(card, "save")}
           onDismiss={(card) => queueFeedback(card, "dismiss")}
