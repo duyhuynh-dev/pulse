@@ -56,6 +56,27 @@ function SnapshotSection({
                 {item.freshness.lastVerifiedAt ? ` · ${formatRelativeTimestamp(item.freshness.lastVerifiedAt)}` : ""}
               </span>
             </div>
+            {item.scoreSummary ? (
+              <p className="mt-3 text-sm leading-6 text-slate-700">{item.scoreSummary}</p>
+            ) : null}
+            {item.scoreBreakdown.length ? (
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
+                {item.scoreBreakdown.slice(0, 4).map((factor) => (
+                  <span
+                    key={`${item.eventId}-${factor.key}`}
+                    className={[
+                      "rounded-full border px-3 py-1",
+                      factor.direction === "negative"
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-stroke/80 bg-canvas text-slate-700"
+                    ].join(" ")}
+                    title={factor.detail}
+                  >
+                    {factor.label} · {factor.impactLabel}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </article>
         ))}
       </div>

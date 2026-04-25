@@ -27,6 +27,15 @@ class RecommendationProvenance(BaseModel):
     hasTicketUrl: bool = False
 
 
+class RecommendationScoreBreakdownItem(BaseModel):
+    key: str
+    label: str
+    impactLabel: str
+    detail: str
+    contribution: float
+    direction: str = "positive"
+
+
 class SecondaryEvent(BaseModel):
     eventId: str
     title: str
@@ -48,6 +57,8 @@ class VenueRecommendationCard(BaseModel):
     reasons: list[RecommendationReason] = Field(default_factory=list)
     freshness: RecommendationFreshness = Field(default_factory=RecommendationFreshness)
     provenance: RecommendationProvenance
+    scoreSummary: str | None = None
+    scoreBreakdown: list[RecommendationScoreBreakdownItem] = Field(default_factory=list)
     secondaryEvents: list[SecondaryEvent] = Field(default_factory=list)
 
 

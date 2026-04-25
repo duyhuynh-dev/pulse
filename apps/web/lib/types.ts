@@ -39,6 +39,15 @@ export interface RecommendationProvenance {
   hasTicketUrl: boolean;
 }
 
+export interface RecommendationScoreBreakdownItem {
+  key: string;
+  label: string;
+  impactLabel: string;
+  detail: string;
+  contribution: number;
+  direction: "positive" | "negative";
+}
+
 export interface TravelEstimate {
   mode: "walk" | "transit";
   label: string;
@@ -60,6 +69,8 @@ export interface VenueRecommendationCard {
   reasons: RecommendationReason[];
   freshness: RecommendationFreshness;
   provenance: RecommendationProvenance;
+  scoreSummary?: string | null;
+  scoreBreakdown: RecommendationScoreBreakdownItem[];
   secondaryEvents: Array<{
     eventId: string;
     title: string;

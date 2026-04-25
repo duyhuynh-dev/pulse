@@ -17,6 +17,7 @@ from app.schemas.recommendations import (
     RecommendationFreshness,
     RecommendationProvenance,
     RecommendationReason,
+    RecommendationScoreBreakdownItem,
     TravelEstimate,
     VenueRecommendationCard,
 )
@@ -66,6 +67,9 @@ BROAD_CULTURAL_THEME_KEYS = {
     "style_design_shopping",
     "creative_meetups",
 }
+REASON_META_KEY = "_pulseMeta"
+REASON_META_SCORE_SUMMARY = "score_summary"
+REASON_META_SCORE_BREAKDOWN = "score_breakdown"
 
 
 @dataclass
@@ -85,6 +89,21 @@ class AnchorResolution:
     requested_within_service_area: bool = True
     used_fallback_anchor: bool = False
     fallback_reason: str | None = None
+
+
+@dataclass
+class CandidateScoreComponents:
+    interest_fit: float
+    category_fit: float
+    distance_fit: float
+    budget_fit: float
+    source_confidence: float
+    transit_minutes: int
+    weighted_interest: float
+    weighted_category: float
+    weighted_distance: float
+    weighted_budget: float
+    weighted_source: float
 
 
 async def _latest_run(session: AsyncSession, user_id: str) -> RecommendationRun | None:
@@ -641,16 +660,245 @@ def _candidate_score(
     category: str = "",
     tags: list[str] | None = None,
 ) -> tuple[float, list[UserInterestProfile], list[UserInterestProfile]]:
+    score, matched_topics, muted_topics, _ = _candidate_score_with_components(
+        topic_keys,
+        profiles_by_key,
+        source_confidence,
+        transit_minutes,
+        budget_fit,
+        category=category,
+        tags=tags,
+    )
+    return score, matched_topics, muted_topics
+
+
+def _candidate_score_with_components(
+    topic_keys: list[str],
+    profiles_by_key: dict[str, UserInterestProfile],
+    source_confidence: float,
+    transit_minutes: int,
+    budget_fit: float,
+    *,
+    category: str = "",
+    tags: list[str] | None = None,
+) -> tuple[float, list[UserInterestProfile], list[UserInterestProfile], CandidateScoreComponents]:
     interest_fit, matched_topics, muted_topics = _interest_fit(topic_keys, profiles_by_key)
     category_fit = _category_affinity(category, tags or [], profiles_by_key)
+    distance_fit = _distance_fit(transit_minutes)
+    weighted_interest = interest_fit * 0.64
+    weighted_category = category_fit * 0.15
+    weighted_distance = distance_fit * 0.11
+    weighted_budget = budget_fit * 0.10
+    weighted_source = source_confidence * 0.05
     total_score = _clamp_score(
-        (interest_fit * 0.64)
-        + (category_fit * 0.15)
-        + (_distance_fit(transit_minutes) * 0.11)
-        + (budget_fit * 0.10)
-        + (source_confidence * 0.05)
+        weighted_interest
+        + weighted_category
+        + weighted_distance
+        + weighted_budget
+        + weighted_source
     )
-    return total_score, matched_topics, muted_topics
+    return (
+        total_score,
+        matched_topics,
+        muted_topics,
+        CandidateScoreComponents(
+            interest_fit=interest_fit,
+            category_fit=category_fit,
+            distance_fit=distance_fit,
+            budget_fit=budget_fit,
+            source_confidence=source_confidence,
+            transit_minutes=transit_minutes,
+            weighted_interest=weighted_interest,
+            weighted_category=weighted_category,
+            weighted_distance=weighted_distance,
+            weighted_budget=weighted_budget,
+            weighted_source=weighted_source,
+        ),
+    )
+
+
+def _impact_label(contribution: float) -> str:
+    magnitude = abs(contribution)
+    if contribution < 0:
+        if magnitude >= 0.12:
+            return "holding it back"
+        if magnitude >= 0.05:
+            return "soft drag"
+        return "small drag"
+
+    if magnitude >= 0.35:
+        return "driving this pick"
+    if magnitude >= 0.12:
+        return "strong support"
+    if magnitude >= 0.05:
+        return "helping"
+    return "small lift"
+
+
+def _score_breakdown_items(
+    *,
+    components: CandidateScoreComponents,
+    matched_labels: list[str],
+    muted_labels: list[str],
+    feedback_adjustment: float,
+    feedback_reason: dict | None,
+) -> list[dict]:
+    items: list[dict] = [
+        {
+            "key": "profile_fit",
+            "label": "Profile fit",
+            "impactLabel": _impact_label(components.weighted_interest),
+            "detail": (
+                f"Matched {_join_labels(matched_labels)}."
+                if matched_labels
+                else "No direct theme match, so this leaned on weaker defaults."
+            ),
+            "contribution": round(components.weighted_interest, 3),
+            "direction": "positive",
+            "summaryLabel": "profile fit",
+        },
+        {
+            "key": "distance_fit",
+            "label": "Travel fit",
+            "impactLabel": _impact_label(components.weighted_distance),
+            "detail": f"About {components.transit_minutes} min by transit from your current NYC anchor.",
+            "contribution": round(components.weighted_distance, 3),
+            "direction": "positive",
+            "summaryLabel": "travel convenience",
+        },
+        {
+            "key": "budget_fit",
+            "label": "Budget fit",
+            "impactLabel": _impact_label(components.weighted_budget),
+            "detail": (
+                "Comfortably inside budget."
+                if components.budget_fit >= 0.85
+                else "A little pricier, but still workable."
+            ),
+            "contribution": round(components.weighted_budget, 3),
+            "direction": "positive",
+            "summaryLabel": "budget fit",
+        },
+        {
+            "key": "source_trust",
+            "label": "Source trust",
+            "impactLabel": _impact_label(components.weighted_source),
+            "detail": (
+                "Backed by a highly trusted source."
+                if components.source_confidence >= 0.88
+                else "Supported by a solid source signal."
+                if components.source_confidence >= 0.78
+                else "Still useful, but from a lighter-confidence source."
+            ),
+            "contribution": round(components.weighted_source, 3),
+            "direction": "positive",
+            "summaryLabel": "source trust",
+        },
+    ]
+
+    if components.weighted_category >= 0.015:
+        items.append(
+            {
+                "key": "category_fit",
+                "label": "Category overlap",
+                "impactLabel": _impact_label(components.weighted_category),
+                "detail": "Event tags and category echoed your active themes.",
+                "contribution": round(components.weighted_category, 3),
+                "direction": "positive",
+                "summaryLabel": "category overlap",
+            }
+        )
+
+    if muted_labels and feedback_reason is None:
+        items.append(
+            {
+                "key": "muted_topics",
+                "label": "Muted topics",
+                "impactLabel": "holding it back",
+                "detail": f"Muted topics like {_join_labels(muted_labels)} reduced this pick's ceiling.",
+                "contribution": round(-0.06, 3),
+                "direction": "negative",
+                "summaryLabel": "muted topics",
+            }
+        )
+
+    if abs(feedback_adjustment) >= 0.015:
+        items.append(
+            {
+                "key": "feedback",
+                "label": "Recent feedback",
+                "impactLabel": _impact_label(feedback_adjustment),
+                "detail": (
+                    feedback_reason["detail"]
+                    if feedback_reason is not None
+                    else "Recent saves and dismisses nudged this venue's rank."
+                ),
+                "contribution": round(feedback_adjustment, 3),
+                "direction": "positive" if feedback_adjustment >= 0 else "negative",
+                "summaryLabel": "recent feedback" if feedback_adjustment >= 0 else "recent dismiss patterns",
+            }
+        )
+
+    return sorted(items, key=lambda item: abs(item["contribution"]), reverse=True)
+
+
+def _score_summary(score_breakdown: list[dict]) -> str | None:
+    positive_items = [item for item in score_breakdown if item["contribution"] > 0.025]
+    negative_items = [item for item in score_breakdown if item["contribution"] < -0.025]
+
+    if positive_items[:2]:
+        lead_labels = [item["summaryLabel"] for item in positive_items[:2]]
+        if len(lead_labels) == 1:
+            summary = f"Mostly driven by {lead_labels[0]}."
+        else:
+            summary = f"Led by {lead_labels[0]} and {lead_labels[1]}."
+    elif positive_items:
+        summary = f"Mostly driven by {positive_items[0]['summaryLabel']}."
+    else:
+        summary = "This pick is hanging together on smaller supporting signals."
+
+    if negative_items:
+        summary = f"{summary[:-1]}, with {negative_items[0]['summaryLabel']} holding it back."
+
+    return summary
+
+
+def _pack_reason_payload(
+    reasons: list[dict],
+    *,
+    score_summary: str | None,
+    score_breakdown: list[dict],
+) -> list[dict]:
+    payload = [dict(reason) for reason in reasons]
+    if score_summary:
+        payload.append({REASON_META_KEY: REASON_META_SCORE_SUMMARY, "summary": score_summary})
+    if score_breakdown:
+        payload.append({REASON_META_KEY: REASON_META_SCORE_BREAKDOWN, "items": score_breakdown})
+    return payload
+
+
+def _unpack_reason_payload(
+    payload: list[dict] | None,
+) -> tuple[list[RecommendationReason], str | None, list[RecommendationScoreBreakdownItem]]:
+    reasons: list[RecommendationReason] = []
+    score_summary: str | None = None
+    score_breakdown: list[RecommendationScoreBreakdownItem] = []
+
+    for item in payload or []:
+        meta_key = item.get(REASON_META_KEY)
+        if meta_key == REASON_META_SCORE_SUMMARY:
+            candidate_summary = item.get("summary")
+            if isinstance(candidate_summary, str):
+                score_summary = candidate_summary
+            continue
+        if meta_key == REASON_META_SCORE_BREAKDOWN:
+            candidate_items = item.get("items") or []
+            score_breakdown = [RecommendationScoreBreakdownItem(**candidate) for candidate in candidate_items]
+            continue
+        if "title" in item and "detail" in item:
+            reasons.append(RecommendationReason(title=item["title"], detail=item["detail"]))
+
+    return reasons, score_summary, score_breakdown
 
 
 def _normalize_text(value: str | None) -> str:
@@ -944,11 +1192,12 @@ async def refresh_recommendations_for_user(
         topic_keys = metadata.get("topicKeys") or _derive_topic_keys(event, metadata.get("tags", []))
         source_confidence = metadata.get("sourceConfidence", 0.75)
         budget_fit = _budget_fit(constraints, occurrence)
-        score, matched_topics, muted_topics = _candidate_score(
+        transit_minutes = _transit_minutes(travel)
+        score, matched_topics, muted_topics, score_components = _candidate_score_with_components(
             topic_keys,
             profiles_by_key,
             source_confidence,
-            _transit_minutes(travel),
+            transit_minutes,
             budget_fit,
             category=event.category,
             tags=metadata.get("tags", []),
@@ -960,6 +1209,16 @@ async def refresh_recommendations_for_user(
             feedback_signals=feedback_signals,
         )
         adjusted_score = _clamp_score(score + feedback_adjustment)
+        matched_labels = [topic.label for topic in matched_topics]
+        muted_labels = [topic.label for topic in muted_topics]
+        score_breakdown = _score_breakdown_items(
+            components=score_components,
+            matched_labels=matched_labels,
+            muted_labels=muted_labels,
+            feedback_adjustment=feedback_adjustment,
+            feedback_reason=feedback_reason,
+        )
+        score_summary = _score_summary(score_breakdown)
         entry = {
             "venue": venue,
             "event": event,
@@ -978,6 +1237,8 @@ async def refresh_recommendations_for_user(
                 venue=venue,
                 feedback_reason=feedback_reason,
             ),
+            "score_summary": score_summary,
+            "score_breakdown": score_breakdown,
         }
         venue_entries.setdefault(venue.id, []).append(entry)
 
@@ -1012,7 +1273,11 @@ async def refresh_recommendations_for_user(
                 rank=rank,
                 score=primary["score"],
                 score_band=primary["score_band"],
-                reasons_json=primary["reasons"],
+                reasons_json=_pack_reason_payload(
+                    primary["reasons"],
+                    score_summary=primary["score_summary"],
+                    score_breakdown=primary["score_breakdown"],
+                ),
                 travel_json=primary["travel"],
                 secondary_events_json=_secondary_events_payload(entries),
             )
@@ -1067,10 +1332,7 @@ async def _cards_for_run(
             venue.latitude,
             venue.longitude,
         )
-        reasons = [
-            RecommendationReason(title=item["title"], detail=item["detail"])
-            for item in recommendation.reasons_json
-        ]
+        reasons, score_summary, score_breakdown = _unpack_reason_payload(recommendation.reasons_json)
 
         card = VenueRecommendationCard(
             venueId=venue.id,
@@ -1087,6 +1349,8 @@ async def _cards_for_run(
             reasons=reasons,
             freshness=_build_freshness(occurrence),
             provenance=_build_provenance(source, occurrence),
+            scoreSummary=score_summary,
+            scoreBreakdown=score_breakdown,
             secondaryEvents=recommendation.secondary_events_json or [],
         )
         items.append(card)

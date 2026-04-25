@@ -33,6 +33,7 @@ export function RecommendationDrawer({
   const orderedCards = Object.values(cards).sort((left, right) => right.score - left.score);
   const visibleCards = mode === "rail" ? orderedCards.slice(0, previewCount) : orderedCards;
   const canShowAll = mode === "rail" && orderedCards.length > visibleCards.length;
+  const breakdownPreviewCount = mode === "rail" ? 3 : 5;
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
@@ -138,6 +139,29 @@ export function RecommendationDrawer({
                   {card.freshness.lastVerifiedAt ? ` · ${formatRelativeTimestamp(card.freshness.lastVerifiedAt)}` : ""}
                 </span>
               </div>
+
+              {card.scoreSummary ? (
+                <p className="mt-4 text-sm leading-6 text-slate-700">{card.scoreSummary}</p>
+              ) : null}
+
+              {card.scoreBreakdown.length ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
+                  {card.scoreBreakdown.slice(0, breakdownPreviewCount).map((item) => (
+                    <span
+                      key={`${card.venueId}-${item.key}`}
+                      className={[
+                        "rounded-full border px-3 py-1",
+                        item.direction === "negative"
+                          ? "border-amber-200 bg-amber-50 text-amber-800"
+                          : "border-stroke/80 bg-white text-slate-700"
+                      ].join(" ")}
+                      title={item.detail}
+                    >
+                      {item.label} · {item.impactLabel}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="mt-4 space-y-2">
                 {card.reasons.filter((reason) => reason.title !== "Travel fit").map((reason) => (
