@@ -133,6 +133,37 @@ class RecommendationDebugSummary(BaseModel):
     venues: list[RecommendationDebugVenue] = Field(default_factory=list)
 
 
+class RecommendationRunComparisonItem(BaseModel):
+    venueId: str
+    venueName: str
+    neighborhood: str
+    currentRank: int | None = None
+    previousRank: int | None = None
+    rankDelta: int | None = None
+    currentScore: float | None = None
+    previousScore: float | None = None
+    scoreDelta: float | None = None
+    scoreBand: str | None = None
+    scoreSummary: str | None = None
+    movement: str
+
+
+class RecommendationRunComparison(BaseModel):
+    currentRunId: str | None = None
+    previousRunId: str | None = None
+    currentGeneratedAt: str | None = None
+    previousGeneratedAt: str | None = None
+    currentContextHash: str | None = None
+    previousContextHash: str | None = None
+    summary: str | None = None
+    shortlistSize: int = 0
+    comparableVenueCount: int = 0
+    newEntrants: list[RecommendationRunComparisonItem] = Field(default_factory=list)
+    droppedVenues: list[RecommendationRunComparisonItem] = Field(default_factory=list)
+    movers: list[RecommendationRunComparisonItem] = Field(default_factory=list)
+    steadyLeaders: list[RecommendationRunComparisonItem] = Field(default_factory=list)
+
+
 class ArchiveSnapshot(BaseModel):
     runId: str
     kind: str

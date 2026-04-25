@@ -12,7 +12,10 @@ from app.schemas.recommendations import (
 from app.services.recommendations import (
     AnchorResolution,
     CandidateScoreComponents,
+    _compare_shortlists,
+    _comparison_summary_sentence,
     _context_hash,
+    _deletable_run_ids,
     _driver_summaries,
     _pack_reason_payload,
     _score_breakdown_items,
@@ -255,3 +258,83 @@ def test_context_hash_changes_when_shortlist_changes() -> None:
     )
 
     assert first_hash != second_hash
+
+
+def test_deletable_run_ids_keeps_recent_runs_and_protected_snapshots() -> None:
+    run_ids = ["run-newest", "run-2", "run-3", "run-4", "run-5"]
+    protected_run_ids = {"run-4"}
+
+    deletable = _deletable_run_ids(run_ids, protected_run_ids, keep_recent_count=2)
+
+    assert deletable == ["run-3", "run-5"]
+
+
+def test_compare_shortlists_identifies_new_dropped_and_moved_venues() -> None:
+    previous_items = [
+        _sample_card(
+            venue_id="venue-a",
+            venue_name="Public Records",
+            score=0.92,
+            score_band="high",
+            score_summary="Led by profile fit.",
+            score_breakdown=[],
+        ),
+        _sample_card(
+            venue_id="venue-b",
+            venue_name="Elsewhere",
+            score=0.88,
+            score_band="high",
+            score_summary="Led by source trust.",
+            score_breakdown=[],
+        ),
+        _sample_card(
+            venue_id="venue-c",
+            venue_name="Nowadays",
+            score=0.84,
+            score_band="medium",
+            score_summary="Led by travel fit.",
+            score_breakdown=[],
+        ),
+    ]
+    current_items = [
+        _sample_card(
+            venue_id="venue-b",
+            venue_name="Elsewhere",
+            score=0.91,
+            score_band="high",
+            score_summary="Led by profile fit.",
+            score_breakdown=[],
+        ),
+        _sample_card(
+            venue_id="venue-a",
+            venue_name="Public Records",
+            score=0.9,
+            score_band="high",
+            score_summary="Led by source trust.",
+            score_breakdown=[],
+        ),
+        _sample_card(
+            venue_id="venue-d",
+            venue_name="Paragon",
+            score=0.83,
+            score_band="medium",
+            score_summary="Led by category overlap.",
+            score_breakdown=[],
+        ),
+    ]
+
+    new_entrants, dropped_venues, movers, steady_leaders = _compare_shortlists(current_items, previous_items)
+
+    assert new_entrants[0].venueId == "venue-d"
+    assert dropped_venues[0].venueId == "venue-c"
+    assert {item.venueId for item in movers} == {"venue-a", "venue-b"}
+    assert steady_leaders == []
+
+    summary = _comparison_summary_sentence(
+        new_entrants=new_entrants,
+        dropped_venues=dropped_venues,
+        movers=movers,
+    )
+    assert summary is not None
+    assert "entered the shortlist" in summary
+    assert "dropped out" in summary

@@ -30,6 +30,7 @@ from app.schemas.recommendations import (
     ArchiveResponse,
     FeedbackPayload,
     RecommendationDebugSummary,
+    RecommendationRunComparison,
     RecommendationsMapResponse,
 )
 from app.schemas.taste import (
@@ -55,6 +56,7 @@ from app.services.recommendations import (
     get_archive,
     get_map_recommendations,
     get_recommendation_debug_summary,
+    get_recommendation_run_comparison,
     refresh_recommendations_for_user,
 )
 from app.services.recommendations import _build_map_context, _user_anchor_resolution
@@ -464,6 +466,14 @@ async def recommendations_debug_summary(
     user=Depends(current_user),
 ) -> RecommendationDebugSummary:
     return await get_recommendation_debug_summary(session, user)
+
+
+@router.get("/recommendations/run-comparison", response_model=RecommendationRunComparison)
+async def recommendations_run_comparison(
+    session: AsyncSession = Depends(get_db),
+    user=Depends(current_user),
+) -> RecommendationRunComparison:
+    return await get_recommendation_run_comparison(session, user)
 
 
 @router.post("/recommendations/refresh", response_model=OkResponse)

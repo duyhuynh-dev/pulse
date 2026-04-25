@@ -16,6 +16,8 @@ from app.schemas.recommendations import (
     RecommendationDebugSummary,
     RecommendationDebugVenue,
     RecommendationDriverSummary,
+    RecommendationRunComparison,
+    RecommendationRunComparisonItem,
     MapVenuePin,
     MapContext,
     RecommendationsMapResponse,
@@ -45,6 +47,7 @@ RECOMMENDATION_MAX_AGE = timedelta(minutes=30)
 FEEDBACK_LOOKBACK_WINDOW = timedelta(days=28)
 OCCURRENCE_LOOKBACK_WINDOW = timedelta(hours=2)
 OCCURRENCE_LOOKAHEAD_WINDOW = timedelta(days=60)
+RECOMMENDATION_RUN_HISTORY_LIMIT = 3
 TOPIC_KEYWORD_MAP = {
     "underground_dance": ["techno", "warehouse", "club", "dance", "rave", "dj"],
     "indie_live_music": ["indie", "band", "concert", "live music", "show", "songwriter", "alt-pop"],
@@ -117,6 +120,19 @@ async def _latest_run(session: AsyncSession, user_id: str) -> RecommendationRun 
         .where(RecommendationRun.user_id == user_id)
         .order_by(desc(RecommendationRun.created_at))
         .limit(1)
+    )
+
+
+async def _latest_runs(session: AsyncSession, user_id: str, *, limit: int) -> list[RecommendationRun]:
+    return list(
+        (
+            await session.scalars(
+                select(RecommendationRun)
+                .where(RecommendationRun.user_id == user_id)
+                .order_by(desc(RecommendationRun.created_at), desc(RecommendationRun.id))
+                .limit(limit)
+            )
+        ).all()
     )
 
 
@@ -1068,6 +1084,142 @@ def _debug_summary_sentence(
     return f"This run is mostly being held back by {lead_drag.label.lower()}."
 
 
+def _comparison_summary_sentence(
+    *,
+    new_entrants: list[RecommendationRunComparisonItem],
+    dropped_venues: list[RecommendationRunComparisonItem],
+    movers: list[RecommendationRunComparisonItem],
+) -> str | None:
+    if not new_entrants and not dropped_venues and not movers:
+        return "This run is very similar to the previous shortlist."
+
+    parts: list[str] = []
+    if new_entrants:
+        lead = new_entrants[0]
+        label = f"{lead.venueName} entered the shortlist"
+        if len(new_entrants) > 1:
+            label += f" alongside {len(new_entrants) - 1} other new venue{'s' if len(new_entrants) > 2 else ''}"
+        parts.append(label)
+    if movers:
+        lead_mover = movers[0]
+        direction = "up" if (lead_mover.rankDelta or 0) > 0 else "down"
+        parts.append(f"{lead_mover.venueName} moved {direction} the most")
+    if dropped_venues:
+        lead_drop = dropped_venues[0]
+        label = f"{lead_drop.venueName} dropped out"
+        if len(dropped_venues) > 1:
+            label += f" with {len(dropped_venues) - 1} other exit{'s' if len(dropped_venues) > 2 else ''}"
+        parts.append(label)
+    return ". ".join(parts) + "."
+
+
+def _rank_lookup(items: list[VenueRecommendationCard]) -> dict[str, tuple[int, VenueRecommendationCard]]:
+    return {
+        item.venueId: (index + 1, item)
+        for index, item in enumerate(items)
+    }
+
+
+def _comparison_item(
+    *,
+    current_rank: int | None,
+    previous_rank: int | None,
+    current_card: VenueRecommendationCard | None,
+    previous_card: VenueRecommendationCard | None,
+    movement: str,
+) -> RecommendationRunComparisonItem:
+    card = current_card or previous_card
+    rank_delta = None
+    if current_rank is not None and previous_rank is not None:
+        rank_delta = previous_rank - current_rank
+
+    current_score = current_card.score if current_card is not None else None
+    previous_score = previous_card.score if previous_card is not None else None
+    score_delta = None
+    if current_score is not None and previous_score is not None:
+        score_delta = round(current_score - previous_score, 3)
+
+    return RecommendationRunComparisonItem(
+        venueId=card.venueId,
+        venueName=card.venueName,
+        neighborhood=card.neighborhood,
+        currentRank=current_rank,
+        previousRank=previous_rank,
+        rankDelta=rank_delta,
+        currentScore=current_score,
+        previousScore=previous_score,
+        scoreDelta=score_delta,
+        scoreBand=current_card.scoreBand if current_card is not None else previous_card.scoreBand if previous_card is not None else None,
+        scoreSummary=current_card.scoreSummary if current_card is not None else previous_card.scoreSummary if previous_card is not None else None,
+        movement=movement,
+    )
+
+
+def _compare_shortlists(
+    current_items: list[VenueRecommendationCard],
+    previous_items: list[VenueRecommendationCard],
+) -> tuple[
+    list[RecommendationRunComparisonItem],
+    list[RecommendationRunComparisonItem],
+    list[RecommendationRunComparisonItem],
+    list[RecommendationRunComparisonItem],
+]:
+    current_lookup = _rank_lookup(current_items)
+    previous_lookup = _rank_lookup(previous_items)
+
+    new_entrants: list[RecommendationRunComparisonItem] = []
+    dropped_venues: list[RecommendationRunComparisonItem] = []
+    movers: list[RecommendationRunComparisonItem] = []
+    steady_leaders: list[RecommendationRunComparisonItem] = []
+
+    for venue_id, (current_rank, current_card) in current_lookup.items():
+        previous = previous_lookup.get(venue_id)
+        if previous is None:
+            new_entrants.append(
+                _comparison_item(
+                    current_rank=current_rank,
+                    previous_rank=None,
+                    current_card=current_card,
+                    previous_card=None,
+                    movement="new",
+                )
+            )
+            continue
+
+        previous_rank, previous_card = previous
+        comparison = _comparison_item(
+            current_rank=current_rank,
+            previous_rank=previous_rank,
+            current_card=current_card,
+            previous_card=previous_card,
+            movement="steady",
+        )
+        if comparison.rankDelta and comparison.rankDelta != 0:
+            comparison.movement = "up" if comparison.rankDelta > 0 else "down"
+            movers.append(comparison)
+        elif current_rank <= 3:
+            steady_leaders.append(comparison)
+
+    for venue_id, (previous_rank, previous_card) in previous_lookup.items():
+        if venue_id in current_lookup:
+            continue
+        dropped_venues.append(
+            _comparison_item(
+                current_rank=None,
+                previous_rank=previous_rank,
+                current_card=None,
+                previous_card=previous_card,
+                movement="dropped",
+            )
+        )
+
+    new_entrants.sort(key=lambda item: item.currentRank or 999)
+    dropped_venues.sort(key=lambda item: item.previousRank or 999)
+    movers.sort(key=lambda item: (-abs(item.rankDelta or 0), item.currentRank or 999))
+    steady_leaders.sort(key=lambda item: item.currentRank or 999)
+    return new_entrants[:4], dropped_venues[:4], movers[:6], steady_leaders[:4]
+
+
 def _normalize_text(value: str | None) -> str:
     return (value or "").strip().lower()
 
@@ -1221,8 +1373,15 @@ def _display_timezone(user: User) -> str:
     return user.timezone or "America/New_York"
 
 
-def _deletable_run_ids(run_ids: list[str], protected_run_ids: set[str]) -> list[str]:
-    return [run_id for run_id in run_ids if run_id not in protected_run_ids]
+def _deletable_run_ids(
+    run_ids: list[str],
+    protected_run_ids: set[str],
+    *,
+    keep_recent_count: int = 0,
+) -> list[str]:
+    retained_recent_ids = set(run_ids[:keep_recent_count])
+    retained_ids = retained_recent_ids | protected_run_ids
+    return [run_id for run_id in run_ids if run_id not in retained_ids]
 
 
 def _run_is_stale(run: RecommendationRun) -> bool:
@@ -1284,7 +1443,12 @@ async def _catalog_changed_since(
 
 
 async def _replace_user_runs(session: AsyncSession, user_id: str) -> None:
-    run_ids = list((await session.scalars(select(RecommendationRun.id).where(RecommendationRun.user_id == user_id))).all())
+    runs = await _latest_runs(
+        session,
+        user_id,
+        limit=RECOMMENDATION_RUN_HISTORY_LIMIT + 24,
+    )
+    run_ids = [run.id for run in runs]
     if not run_ids:
         return
 
@@ -1297,7 +1461,11 @@ async def _replace_user_runs(session: AsyncSession, user_id: str) -> None:
             )
         ).all()
     )
-    deletable_run_ids = _deletable_run_ids(run_ids, protected_run_ids)
+    deletable_run_ids = _deletable_run_ids(
+        run_ids,
+        protected_run_ids,
+        keep_recent_count=max(0, RECOMMENDATION_RUN_HISTORY_LIMIT - 1),
+    )
     if not deletable_run_ids:
         return
 
@@ -1681,6 +1849,73 @@ async def get_recommendation_debug_summary(
             )
             for index, item in enumerate(items)
         ],
+    )
+
+
+async def get_recommendation_run_comparison(
+    session: AsyncSession,
+    user: User,
+) -> RecommendationRunComparison:
+    current_run = await refresh_recommendations_for_user(session, user)
+    if current_run is None:
+        return RecommendationRunComparison()
+
+    recent_runs = await _latest_runs(session, user.id, limit=2)
+    if len(recent_runs) < 2:
+        return RecommendationRunComparison(
+            currentRunId=current_run.id,
+            currentGeneratedAt=_timestamp_utc(current_run.created_at).isoformat(),
+            shortlistSize=0,
+            summary="Pulse needs one more completed run before it can compare ranking changes.",
+        )
+
+    current_run = recent_runs[0]
+    previous_run = recent_runs[1]
+    anchor_resolution = await _user_anchor_resolution(session, user.id)
+    constraints = await _user_constraints(session, user.id)
+    topic_rows = list(
+        (
+            await session.scalars(
+                select(UserInterestProfile)
+                .where(UserInterestProfile.user_id == user.id)
+                .order_by(UserInterestProfile.confidence.desc(), UserInterestProfile.topic_key.asc())
+            )
+        ).all()
+    )
+    _, current_items, _ = await _cards_for_run(session, current_run)
+    _, previous_items, _ = await _cards_for_run(session, previous_run)
+    new_entrants, dropped_venues, movers, steady_leaders = _compare_shortlists(current_items, previous_items)
+
+    return RecommendationRunComparison(
+        currentRunId=current_run.id,
+        previousRunId=previous_run.id,
+        currentGeneratedAt=_timestamp_utc(current_run.created_at).isoformat(),
+        previousGeneratedAt=_timestamp_utc(previous_run.created_at).isoformat(),
+        currentContextHash=_context_hash(
+            run=current_run,
+            resolution=anchor_resolution,
+            constraints=constraints,
+            topics=topic_rows,
+            items=current_items,
+        ),
+        previousContextHash=_context_hash(
+            run=previous_run,
+            resolution=anchor_resolution,
+            constraints=constraints,
+            topics=topic_rows,
+            items=previous_items,
+        ),
+        summary=_comparison_summary_sentence(
+            new_entrants=new_entrants,
+            dropped_venues=dropped_venues,
+            movers=movers,
+        ),
+        shortlistSize=len(current_items),
+        comparableVenueCount=len(set(_rank_lookup(current_items)).intersection(_rank_lookup(previous_items))),
+        newEntrants=new_entrants,
+        droppedVenues=dropped_venues,
+        movers=movers,
+        steadyLeaders=steady_leaders,
     )
 
 
