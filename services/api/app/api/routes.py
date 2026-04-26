@@ -50,7 +50,14 @@ from app.services.auth import (
     resolve_user,
     set_pulse_session_cookie,
 )
-from app.services.digest import build_digest_preview, send_digest_preview, send_due_weekly_digests
+from app.services.digest import (
+    build_digest_preview,
+    digest_click_fallback_url,
+    parse_digest_click_token,
+    safe_digest_destination_url,
+    send_digest_preview,
+    send_due_weekly_digests,
+)
 from app.services.ingestion import upsert_ingested_candidates
 from app.services.profile import get_email_preferences, list_interests, update_email_preferences, update_interests
 from app.services.recommendations import (
@@ -534,6 +541,34 @@ async def digest_send_preview(
         if "No recommendations are available yet" in str(error):
             status_code = status.HTTP_409_CONFLICT
         raise HTTPException(status_code=status_code, detail=str(error)) from error
+
+
+@router.get("/digest/click")
+async def digest_click(
+    token: str,
+    session: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    fallback_url = digest_click_fallback_url()
+    try:
+        payload = parse_digest_click_token(token)
+    except ValueError:
+        return RedirectResponse(fallback_url, status_code=status.HTTP_302_FOUND)
+
+    destination_url = safe_digest_destination_url(payload.destination_url)
+    try:
+        session.add(
+            FeedbackEvent(
+                user_id=payload.user_id,
+                recommendation_id=payload.recommendation_id,
+                action="digest_click",
+                reasons_json=[],
+            )
+        )
+        await session.commit()
+    except Exception:
+        await session.rollback()
+
+    return RedirectResponse(destination_url, status_code=status.HTTP_302_FOUND)
 
 
 @router.post("/internal/digests/send-weekly", response_model=DigestBatchResponse)

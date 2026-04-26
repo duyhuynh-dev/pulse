@@ -3,9 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from html import escape
+from urllib.parse import quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
+import jwt
+from jwt import ExpiredSignatureError, InvalidTokenError
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +17,7 @@ from app.models.recommendation import DigestDelivery, RecommendationRun
 from app.models.user import EmailPreference, User
 from app.schemas.digest import DigestBatchResponse, DigestPreviewResponse, DigestSendResponse
 from app.schemas.recommendations import VenueRecommendationCard
+from app.services.auth import pulse_session_secret
 from app.services.recommendations import get_archive, refresh_recommendations_for_user
 
 
@@ -23,8 +27,17 @@ class DigestPreviewPayload:
     response: DigestPreviewResponse
 
 
+@dataclass
+class DigestClickPayload:
+    user_id: str
+    recommendation_id: str
+    destination_url: str
+
+
 SCHEDULED_DIGEST_PROVIDER = "resend-scheduled"
 PREVIEW_DIGEST_PROVIDER = "resend-preview"
+DIGEST_CLICK_PURPOSE = "digest-click"
+DIGEST_CLICK_TTL_SECONDS = 60 * 60 * 24 * 21
 
 
 async def build_digest_preview(session: AsyncSession, user: User) -> DigestPreviewPayload:
@@ -38,7 +51,7 @@ async def build_digest_preview(session: AsyncSession, user: User) -> DigestPrevi
     preheader = _digest_preheader(items)
     timezone = _user_timezone(user)
     html = _render_digest_html(user, items, subject, preheader, timezone)
-    text = _render_digest_text(items, subject, preheader, timezone)
+    text = _render_digest_text(user, items, subject, preheader, timezone)
 
     return DigestPreviewPayload(
         run=run,
@@ -194,7 +207,7 @@ def _render_digest_html(
     settings = get_settings()
     intro_name = user.display_name or user.email.split("@")[0]
     cards_html = "".join(
-        f'<div style="margin-top:{0 if index == 0 else 16}px;">{_render_card_html(item, timezone)}</div>'
+        f'<div style="margin-top:{0 if index == 0 else 16}px;">{_render_card_html(user, item, timezone)}</div>'
         for index, item in enumerate(items)
     )
     return f"""<!DOCTYPE html>
@@ -228,7 +241,16 @@ def _render_digest_html(
 </html>"""
 
 
-def _render_card_html(item: VenueRecommendationCard, timezone: ZoneInfo) -> str:
+def _render_card_html(user: User, item: VenueRecommendationCard, timezone: ZoneInfo) -> str:
+    cta_label, cta_href = _digest_card_link(user, item)
+    cta_html = (
+        f'<a href="{escape(cta_href)}" '
+        "style=\"display:inline-block;margin-top:16px;padding:10px 14px;border-radius:999px;"
+        "background:#14213d;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;\">"
+        f"{escape(cta_label)}</a>"
+        if cta_href
+        else ""
+    )
     reasons = "".join(
         f"<li style=\"margin:0 0 6px;\">"
         f"<span style=\"font-weight:600;color:#14213d;\">{escape(reason.title)}:</span> {escape(reason.detail)}</li>"
@@ -256,11 +278,13 @@ def _render_card_html(item: VenueRecommendationCard, timezone: ZoneInfo) -> str:
         </p>
         <p style="margin:8px 0 0;color:#4a6078;font-size:14px;line-height:1.7;">{travel}</p>
         <ul style="margin:16px 0 0;padding-left:18px;color:#4a6078;font-size:14px;line-height:1.7;">{reasons}</ul>
+        {cta_html}
       </div>
     """
 
 
 def _render_digest_text(
+    user: User,
     items: list[VenueRecommendationCard],
     subject: str,
     preheader: str,
@@ -279,9 +303,83 @@ def _render_digest_text(
             lines.append(f"   - {reason.title}: {reason.detail}")
         if item.travel:
             lines.append(f"   - Travel: {', '.join(travel.label for travel in item.travel)}")
+        cta_label, cta_href = _digest_card_link(user, item)
+        lines.append(f"   - {cta_label}: {cta_href}")
         lines.append("")
     lines.append("Open the live map in Pulse to keep exploring this week’s shortlist.")
     return "\n".join(lines).strip()
+
+
+def build_digest_click_token(
+    user_id: str,
+    recommendation_id: str,
+    destination_url: str,
+    *,
+    expires_in_seconds: int = DIGEST_CLICK_TTL_SECONDS,
+) -> str:
+    now = datetime.now(tz=UTC)
+    return jwt.encode(
+        {
+            "sub": user_id,
+            "rid": recommendation_id,
+            "url": destination_url,
+            "purpose": DIGEST_CLICK_PURPOSE,
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(seconds=expires_in_seconds)).timestamp()),
+        },
+        _digest_click_secret(),
+        algorithm="HS256",
+    )
+
+
+def parse_digest_click_token(token: str) -> DigestClickPayload:
+    try:
+        payload = jwt.decode(token, _digest_click_secret(), algorithms=["HS256"])
+    except (ExpiredSignatureError, InvalidTokenError) as error:
+        raise ValueError("Digest click token is invalid.") from error
+
+    if payload.get("purpose") != DIGEST_CLICK_PURPOSE:
+        raise ValueError("Digest click token is invalid.")
+
+    user_id = str(payload.get("sub") or "").strip()
+    recommendation_id = str(payload.get("rid") or "").strip()
+    destination_url = str(payload.get("url") or "").strip()
+    if not user_id or not recommendation_id or not destination_url:
+        raise ValueError("Digest click token is invalid.")
+
+    return DigestClickPayload(
+        user_id=user_id,
+        recommendation_id=recommendation_id,
+        destination_url=destination_url,
+    )
+
+
+def digest_click_fallback_url() -> str:
+    return get_settings().web_app_url
+
+
+def safe_digest_destination_url(destination_url: str) -> str:
+    parsed = urlsplit(destination_url)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return destination_url
+    return digest_click_fallback_url()
+
+
+def _digest_card_link(user: User, item: VenueRecommendationCard) -> tuple[str, str]:
+    settings = get_settings()
+    destination_url = item.ticketUrl or settings.web_app_url
+    cta_label = "View tickets" if item.ticketUrl else "Open in Pulse"
+    token = build_digest_click_token(user.id, item.eventId, destination_url)
+    query = urlencode({"token": token}, quote_via=quote)
+    return cta_label, f"{settings.api_base_url.rstrip('/')}/v1/digest/click?{query}"
+
+
+def _digest_click_secret() -> str:
+    settings = get_settings()
+    try:
+        return pulse_session_secret(settings)
+    except Exception:
+        return f"{settings.app_name}-digest-click-dev-secret"
 
 
 def _format_event_time(value: str, timezone: ZoneInfo) -> str:

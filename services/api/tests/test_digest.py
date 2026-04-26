@@ -1,7 +1,9 @@
 import httpx
+import pytest
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
+from app.core.config import Settings
 from app.schemas.recommendations import (
     RecommendationProvenance,
     RecommendationReason,
@@ -9,11 +11,13 @@ from app.schemas.recommendations import (
     VenueRecommendationCard,
 )
 from app.services.digest import (
+    build_digest_click_token,
     _digest_due_now,
     _digest_preheader,
     _digest_subject,
     _format_event_time,
     _provider_error_detail,
+    parse_digest_click_token,
     _render_digest_html,
     _render_digest_text,
 )
@@ -63,8 +67,16 @@ def test_digest_subject_and_preheader_reflect_shortlist() -> None:
     assert _digest_preheader(items) == "Elsewhere, Mercury Lounge, and 1 more picks are leading your latest Pulse shortlist."
 
 
-def test_digest_renderers_include_key_event_details() -> None:
-    user = User(email="duy@example.com", display_name="Duy", timezone="America/New_York")
+def test_digest_renderers_include_key_event_details(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.digest.get_settings",
+        lambda: Settings(
+            api_base_url="https://pulse-api.duckdns.org",
+            web_app_url="https://pulse-app.duckdns.org",
+            pulse_session_secret="digest-click-secret-32-chars-long!",
+        ),
+    )
+    user = User(id="user-123", email="duy@example.com", display_name="Duy", timezone="America/New_York")
     items = [_sample_card("Elsewhere", "Bushwick", "After-Hours Techno Showcase")]
 
     html = _render_digest_html(
@@ -75,6 +87,7 @@ def test_digest_renderers_include_key_event_details() -> None:
         ZoneInfo("America/New_York"),
     )
     text = _render_digest_text(
+        user,
         items,
         "Pulse Weekly: 1 NYC picks for this week",
         "Elsewhere is leading your latest Pulse shortlist.",
@@ -90,6 +103,31 @@ def test_digest_renderers_include_key_event_details() -> None:
     assert "Travel: 18 min walk, 12 min transit" in text
     assert "Sat, Apr 25 · 7:30 PM" in html
     assert "Sat, Apr 25 · 7:30 PM" in text
+    assert "https://pulse-api.duckdns.org/v1/digest/click?token=" in html
+    assert "https://pulse-api.duckdns.org/v1/digest/click?token=" in text
+
+
+def test_digest_click_token_round_trip_preserves_user_recommendation_and_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.digest.get_settings",
+        lambda: Settings(
+            pulse_session_secret="digest-click-secret-32-chars-long!",
+            web_app_url="https://pulse-app.duckdns.org",
+        ),
+    )
+
+    token = build_digest_click_token(
+        "user-123",
+        "rec-456",
+        "https://example.com/tickets",
+    )
+    payload = parse_digest_click_token(token)
+
+    assert payload.user_id == "user-123"
+    assert payload.recommendation_id == "rec-456"
+    assert payload.destination_url == "https://example.com/tickets"
 
 
 def test_provider_error_detail_prefers_json_message() -> None:

@@ -105,6 +105,7 @@ class FeedbackSignals:
     confirmed_saved_venues: dict[str, float] = field(default_factory=dict)
     opened_venues: dict[str, float] = field(default_factory=dict)
     exposed_venues: dict[str, float] = field(default_factory=dict)
+    digest_click_venues: dict[str, float] = field(default_factory=dict)
     ticket_click_venues: dict[str, float] = field(default_factory=dict)
     archive_revisit_venues: dict[str, float] = field(default_factory=dict)
     saved_topics: dict[str, float] = field(default_factory=dict)
@@ -112,6 +113,7 @@ class FeedbackSignals:
     confirmed_saved_topics: dict[str, float] = field(default_factory=dict)
     opened_topics: dict[str, float] = field(default_factory=dict)
     exposed_topics: dict[str, float] = field(default_factory=dict)
+    digest_click_topics: dict[str, float] = field(default_factory=dict)
     ticket_click_topics: dict[str, float] = field(default_factory=dict)
     archive_revisit_topics: dict[str, float] = field(default_factory=dict)
     saved_neighborhoods: dict[str, float] = field(default_factory=dict)
@@ -335,7 +337,7 @@ async def _feedback_signals(session: AsyncSession, user_id: str) -> FeedbackSign
                 _increment_feedback_count(reason_count_store, reason_key)
                 signals.reason_labels[reason_key] = reason_label
 
-        if row.action in {"opened", "exposed", "ticket_click", "archive_revisit"}:
+        if row.action in {"opened", "exposed", "digest_click", "ticket_click", "archive_revisit"}:
             interaction_weight = _interaction_signal_weight(row.action, created_at=row.created_at)
             if row.action == "opened":
                 venue_store = signals.opened_venues
@@ -343,6 +345,9 @@ async def _feedback_signals(session: AsyncSession, user_id: str) -> FeedbackSign
             elif row.action == "exposed":
                 venue_store = signals.exposed_venues
                 topic_store = signals.exposed_topics
+            elif row.action == "digest_click":
+                venue_store = signals.digest_click_venues
+                topic_store = signals.digest_click_topics
             elif row.action == "ticket_click":
                 venue_store = signals.ticket_click_venues
                 topic_store = signals.ticket_click_topics
@@ -562,6 +567,8 @@ def _interaction_signal_weight(action: str, *, created_at: datetime) -> float:
         base_weight = 0.65
     elif action == "exposed":
         base_weight = 0.32
+    elif action == "digest_click":
+        base_weight = 1.35
     elif action == "archive_revisit":
         base_weight = 0.82
     elif action == "ticket_click":
@@ -890,6 +897,7 @@ def _feedback_adjustment(
     confirmed_saved_venue_weight = feedback_signals.confirmed_saved_venues.get(_normalize_text(venue.id), 0.0)
     opened_venue_weight = feedback_signals.opened_venues.get(_normalize_text(venue.id), 0.0)
     exposed_venue_weight = feedback_signals.exposed_venues.get(_normalize_text(venue.id), 0.0)
+    digest_click_venue_weight = feedback_signals.digest_click_venues.get(_normalize_text(venue.id), 0.0)
     ticket_click_venue_weight = feedback_signals.ticket_click_venues.get(_normalize_text(venue.id), 0.0)
     archive_revisit_venue_weight = feedback_signals.archive_revisit_venues.get(_normalize_text(venue.id), 0.0)
     saved_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.saved_topics)
@@ -897,6 +905,7 @@ def _feedback_adjustment(
     confirmed_saved_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.confirmed_saved_topics)
     opened_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.opened_topics)
     exposed_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.exposed_topics)
+    digest_click_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.digest_click_topics)
     ticket_click_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.ticket_click_topics)
     archive_revisit_topic_weight = _average_feedback_weight(topic_keys, feedback_signals.archive_revisit_topics)
     neighborhood_key = _normalize_text(venue.neighborhood)
@@ -913,6 +922,8 @@ def _feedback_adjustment(
         adjustment += min(0.10, 0.03 + (confirmed_saved_venue_weight * 0.04))
     if opened_venue_weight:
         adjustment += min(0.09, 0.02 + (opened_venue_weight * 0.045))
+    if digest_click_venue_weight:
+        adjustment += min(0.14, 0.04 + (digest_click_venue_weight * 0.055))
     if ticket_click_venue_weight:
         adjustment += min(0.12, 0.03 + (ticket_click_venue_weight * 0.05))
     if archive_revisit_venue_weight:
@@ -922,6 +933,7 @@ def _feedback_adjustment(
     adjustment += max(-0.12, min(0.12, topic_delta * 0.10))
     adjustment += max(0.0, min(0.08, confirmed_saved_topic_weight * 0.05))
     adjustment += max(0.0, min(0.06, opened_topic_weight * 0.035))
+    adjustment += max(0.0, min(0.09, digest_click_topic_weight * 0.045))
     adjustment += max(0.0, min(0.08, ticket_click_topic_weight * 0.04))
     adjustment += max(0.0, min(0.07, archive_revisit_topic_weight * 0.035))
     adjustment += max(-0.06, min(0.06, neighborhood_delta * 0.04))
@@ -949,6 +961,11 @@ def _feedback_adjustment(
         feedback_reason = {
             "title": "Validated save",
             "detail": f"You saved {venue.name} and it kept surviving later runs, so Pulse now trusts that signal more.",
+        }
+    elif digest_click_venue_weight >= 0.4:
+        feedback_reason = {
+            "title": "Acted from digest",
+            "detail": f"You clicked {venue.name} directly from a Pulse digest, so Pulse treats it as stronger real-world intent.",
         }
     elif ticket_click_venue_weight >= 0.45:
         feedback_reason = {
@@ -984,6 +1001,11 @@ def _feedback_adjustment(
         feedback_reason = {
             "title": "Validated pattern",
             "detail": f"Saved {_join_labels(topic_labels)} picks kept showing up in later runs, so this signal now gets more trust.",
+        }
+    elif digest_click_topic_weight >= 0.35 and topic_labels:
+        feedback_reason = {
+            "title": "Digest response pattern",
+            "detail": f"You act on {_join_labels(topic_labels)} picks from digest emails, so Pulse treats that theme as stronger intent.",
         }
     elif ticket_click_topic_weight >= 0.35 and topic_labels:
         feedback_reason = {
@@ -1266,6 +1288,8 @@ def _score_breakdown_items(
         feedback_title = feedback_reason.get("title") if feedback_reason is not None else ""
         if feedback_adjustment >= 0 and isinstance(feedback_title, str) and feedback_title.startswith("Validated"):
             summary_label = "validated saves"
+        elif feedback_adjustment >= 0 and feedback_title in {"Acted from digest", "Digest response pattern"}:
+            summary_label = "digest clicks"
         elif feedback_adjustment >= 0 and feedback_title in {"Clicked through before", "Click-through pattern"}:
             summary_label = "ticket clicks"
         elif feedback_adjustment >= 0 and feedback_title in {"Archived revisit", "Archive return pattern"}:
